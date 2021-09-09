@@ -14,6 +14,11 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+import distdl
+from distdl.utilities.slicing import compute_subshape
+from dist_mingpt.utils import make_partition
+
+
 logger = logging.getLogger(__name__)
 
 class GPTConfig:
@@ -43,28 +48,43 @@ class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        assert config.n_embd % config.n_head == 0
+        self.bc = distdl.nn.Broadcast(config.P_input, config.P_attn)
+        self.sr = distdl.nn.SumReduce(config.P_attn, config.P_input)
+        self.P_input = config.P_attn
+        self.config = config
+        # compute the local n_embd and n_head
+        assert config.n_embd % config.M == 0
+        assert config.n_head % config.M == 0
+        local_n_embd = config.n_embd // config.M
+        local_n_head = config.n_head // config.M
+
+        assert local_n_embd % local_n_head == 0
         # key, query, value projections for all heads
-        self.key = nn.Linear(config.n_embd, config.n_embd)
-        self.query = nn.Linear(config.n_embd, config.n_embd)
-        self.value = nn.Linear(config.n_embd, config.n_embd)
+        self.key = nn.Linear(config.n_embd, local_n_embd)
+        self.query = nn.Linear(config.n_embd, local_n_embd)
+        self.value = nn.Linear(config.n_embd, local_n_embd)
         # regularization
         self.attn_drop = nn.Dropout(config.attn_pdrop)
         self.resid_drop = nn.Dropout(config.resid_pdrop)
         # output projection
-        self.proj = nn.Linear(config.n_embd, config.n_embd)
+        self.proj = nn.Linear(local_n_embd, config.n_embd)
         # causal mask to ensure that attention is only applied to the left in the input sequence
         self.register_buffer("mask", torch.tril(torch.ones(config.block_size, config.block_size))
                                      .view(1, 1, config.block_size, config.block_size))
-        self.n_head = config.n_head
+        self.local_n_head = local_n_head
 
     def forward(self, x, layer_past=None):
+        x = self.bc(x)
+
         B, T, C = x.size()
 
+        # we are working with the feature dimension partitioned into M parts, so we divide C by M
+        C //= self.config.M
+
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        k = self.key(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        q = self.query(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = self.value(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        k = self.key(x).view(B, T, self.local_n_head, C // self.local_n_head).transpose(1, 2) # (B, nh, T, hs)
+        q = self.query(x).view(B, T, self.local_n_head, C // self.local_n_head).transpose(1, 2) # (B, nh, T, hs)
+        v = self.value(x).view(B, T, self.local_n_head, C // self.local_n_head).transpose(1, 2) # (B, nh, T, hs)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
@@ -75,7 +95,10 @@ class CausalSelfAttention(nn.Module):
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         # output projection
-        y = self.resid_drop(self.proj(y))
+        y = self.proj(y)
+        y = self.sr(y)
+        if self.P_input.active:
+            y = self.resid_drop(y)
         return y
 
 class Block(nn.Module):
@@ -86,16 +109,25 @@ class Block(nn.Module):
         self.ln1 = nn.LayerNorm(config.n_embd)
         self.ln2 = nn.LayerNorm(config.n_embd)
         self.attn = CausalSelfAttention(config)
+        self.P_input = config.P_input
+        self.P_mlp_hidden = config.P_mlp_hidden
+
+        # compute local linear layer size
+        assert (config.n_embd * 4) % config.M == 0
+        local_hidden_features = (config.n_embd * 4) // config.M
+
         self.mlp = nn.Sequential(
-            nn.Linear(config.n_embd, 4 * config.n_embd),
+            distdl.nn.Broadcast(config.P_input, config.P_mlp_hidden),
+            nn.Linear(config.n_embd, local_hidden_features),
             nn.GELU(),
-            nn.Linear(4 * config.n_embd, config.n_embd),
+            nn.Linear(local_hidden_features, config.n_embd),
+            distdl.nn.SumReduce(config.P_mlp_hidden, config.P_input),
             nn.Dropout(config.resid_pdrop),
         )
 
     def forward(self, x):
-        x = x + self.attn(self.ln1(x))
-        x = x + self.mlp(self.ln2(x))
+        x = (x if self.P_input.active else 0) + self.attn(self.ln1(x) if self.P_input.active else x)
+        x = (x if self.P_input.active else 0) + self.mlp(self.ln2(x) if self.P_input.active else x)
         return x
 
 class GPT(nn.Module):
