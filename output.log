@@ -1,0 +1,131 @@
+Resetting modules to system default. Reseting $MODULEPATH back to system default. All extra directories will be removed from $MODULEPATH.
+
+The following have been reloaded with a version change:
+  1) OpenMPI/4.0.5-gcccuda-2020b => OpenMPI/4.0.5-GCC-10.2.0
+  2) UCX/1.9.0-GCCcore-10.2.0-CUDA-11.1.1 => UCX/1.9.0-GCCcore-10.2.0
+
+--------------------------------------------------------------------------
+Open MPI failed an OFI Libfabric library call (fi_domain).  This is highly
+unusual; your job may behave unpredictably (and/or abort) after this.
+
+  Local host: tc-gpu004
+  Location: mtl_ofi_component.c:610
+  Error: No data available (61)
+--------------------------------------------------------------------------
+[1631250289.298677] [tc-gpu004:24422:0]          ib_md.c:1140 UCX  WARN  IB: ibv_fork_init() was disabled or failed, yet a fork() has been issued.
+[1631250289.298680] [tc-gpu004:24424:0]          ib_md.c:1140 UCX  WARN  IB: ibv_fork_init() was disabled or failed, yet a fork() has been issued.
+[1631250289.298721] [tc-gpu004:24424:0]          ib_md.c:1141 UCX  WARN  IB: data corruption might occur when using registered memory.
+[1631250289.298818] [tc-gpu004:24422:0]          ib_md.c:1141 UCX  WARN  IB: data corruption might occur when using registered memory.
+[1631250289.298877] [tc-gpu004:24421:0]          ib_md.c:1140 UCX  WARN  IB: ibv_fork_init() was disabled or failed, yet a fork() has been issued.
+[1631250289.298910] [tc-gpu004:24421:0]          ib_md.c:1141 UCX  WARN  IB: data corruption might occur when using registered memory.
+[1631250289.299094] [tc-gpu004:24423:0]          ib_md.c:1140 UCX  WARN  IB: ibv_fork_init() was disabled or failed, yet a fork() has been issued.
+[1631250289.299129] [tc-gpu004:24423:0]          ib_md.c:1141 UCX  WARN  IB: data corruption might occur when using registered memory.
+[tc-gpu004:24416] 3 more processes have sent help message help-mtl-ofi.txt / OFI call fail
+[tc-gpu004:24416] Set MCA parameter "orte_base_help_aggregate" to 0 to see all help / error messages
+Parameters local to rank 2: 617580864
+Parameters local to rank 3: 617580864
+Parameters local to rank 0: 617585472
+Parameters local to rank 1: 617580864
+total number of parameters: 2470328064
+[tc-gpu004:24423:0:24423] ib_mlx5_log.c:136  Local QP operation on mlx5_0:1/IB (synd 0x2 vend 0x68 hw_synd 0/31)
+[tc-gpu004:24423:0:24423] ib_mlx5_log.c:136  RC QP 0x668b wqe[1]: RDMA_READ s-- [rva 0x61859380 rkey 0x16153b] [va 0x60c6d810 len 2497024 lkey 0x16274d]
+==== backtrace (tid:  24423) ====
+ 0 0x0000000000020e23 ucs_debug_print_backtrace()  /dev/shm/jkrometi/build/UCX/1.9.0/GCCcore-10.2.0/ucx-1.9.0/src/ucs/debug/debug.c:656
+ 1 0x0000000000021001 uct_ib_mlx5_completion_with_err()  /dev/shm/jkrometi/build/UCX/1.9.0/GCCcore-10.2.0/ucx-1.9.0/src/uct/ib/mlx5/ib_mlx5_log.c:136
+ 2 0x00000000000304ba uct_rc_mlx5_iface_handle_failure()  /dev/shm/jkrometi/build/UCX/1.9.0/GCCcore-10.2.0/ucx-1.9.0/src/uct/ib/rc/accel/rc_mlx5_iface.c:233
+ 3 0x0000000000031d02 uct_ib_mlx5_poll_cq()  /dev/shm/jkrometi/build/UCX/1.9.0/GCCcore-10.2.0/ucx-1.9.0/src/uct/ib/mlx5/ib_mlx5.inl:81
+ 4 0x0000000000031d02 uct_rc_mlx5_iface_progress()  /dev/shm/jkrometi/build/UCX/1.9.0/GCCcore-10.2.0/ucx-1.9.0/src/uct/ib/rc/accel/rc_mlx5_iface.c:149
+ 5 0x0000000000023c9a ucs_callbackq_dispatch()  /dev/shm/jkrometi/build/UCX/1.9.0/GCCcore-10.2.0/ucx-1.9.0/src/ucs/datastruct/callbackq.h:211
+ 6 0x0000000000023c9a uct_worker_progress()  /dev/shm/jkrometi/build/UCX/1.9.0/GCCcore-10.2.0/ucx-1.9.0/src/uct/api/uct.h:2346
+ 7 0x0000000000023c9a ucp_worker_progress()  /dev/shm/jkrometi/build/UCX/1.9.0/GCCcore-10.2.0/ucx-1.9.0/src/ucp/core/ucp_worker.c:2040
+ 8 0x000000000002e643 opal_progress()  ???:0
+ 9 0x0000000000034aa5 ompi_sync_wait_mt()  ???:0
+10 0x000000000005255b ompi_request_default_wait()  ???:0
+11 0x0000000000091f04 MPI_Wait()  ???:0
+12 0x0000000000045856 __pyx_pf_6mpi4py_3MPI_7Request_8Wait()  /tmp/eb-1j6bQ7/pip-req-build-0z_6u9pr/src/mpi4py.MPI.c:80161
+13 0x0000000000045856 __pyx_pf_6mpi4py_3MPI_7Request_8Wait()  /tmp/eb-1j6bQ7/pip-req-build-0z_6u9pr/src/mpi4py.MPI.c:80161
+14 0x0000000000045856 __pyx_pw_6mpi4py_3MPI_7Request_9Wait()  /tmp/eb-1j6bQ7/pip-req-build-0z_6u9pr/src/mpi4py.MPI.c:80111
+15 0x00000000001429d4 method_vectorcall_VARARGS_KEYWORDS()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/descrobject.c:332
+16 0x00000000001348f9 _PyObject_Vectorcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/./Include/cpython/abstract.h:127
+17 0x00000000001348f9 call_function()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Python/ceval.c:4963
+18 0x00000000001348f9 _PyEval_EvalFrameDefault()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Python/ceval.c:3486
+19 0x0000000000141f2a function_code_fastcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:283
+20 0x000000000014ae3d PyVectorcall_Call()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:199
+21 0x00000000008e963d THPFunction_apply()  ???:0
+22 0x0000000000145825 cfunction_call_varargs()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:757
+23 0x000000000013ce61 _PyObject_MakeTpCall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:159
+24 0x0000000000139c6b _PyObject_Vectorcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/./Include/cpython/abstract.h:125
+25 0x0000000000139c6b _PyObject_Vectorcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/./Include/cpython/abstract.h:115
+26 0x0000000000139c6b call_function()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Python/ceval.c:4963
+27 0x0000000000139c6b _PyEval_EvalFrameDefault()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Python/ceval.c:3469
+28 0x0000000000141f2a function_code_fastcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:283
+29 0x000000000014aa7e _PyObject_Vectorcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/./Include/cpython/abstract.h:127
+30 0x000000000014aa7e method_vectorcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/classobject.c:67
+31 0x000000000014ae3d PyVectorcall_Call()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:199
+32 0x00000000001371d9 do_call_core()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Python/ceval.c:5010
+33 0x00000000001371d9 _PyEval_EvalFrameDefault()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Python/ceval.c:3559
+34 0x0000000000133111 _PyEval_EvalCodeWithName()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Python/ceval.c:4298
+35 0x0000000000141c43 _PyFunction_Vectorcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:435
+36 0x000000000013c716 _PyObject_FastCallDict()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:96
+37 0x0000000000148164 _PyObject_Call_Prepend()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:887
+38 0x00000000001ce4f9 slot_tp_call()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/typeobject.c:6553
+39 0x000000000013ce61 _PyObject_MakeTpCall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:159
+40 0x0000000000135226 _PyObject_Vectorcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/./Include/cpython/abstract.h:125
+41 0x0000000000135226 _PyObject_Vectorcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/./Include/cpython/abstract.h:115
+42 0x0000000000135226 call_function()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Python/ceval.c:4963
+43 0x0000000000135226 _PyEval_EvalFrameDefault()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Python/ceval.c:3500
+44 0x0000000000141f2a function_code_fastcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:283
+45 0x000000000014aa7e _PyObject_Vectorcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/./Include/cpython/abstract.h:127
+46 0x000000000014aa7e method_vectorcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/classobject.c:67
+47 0x000000000014ae3d PyVectorcall_Call()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:199
+48 0x00000000001371d9 do_call_core()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Python/ceval.c:5010
+49 0x00000000001371d9 _PyEval_EvalFrameDefault()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Python/ceval.c:3559
+50 0x0000000000133111 _PyEval_EvalCodeWithName()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Python/ceval.c:4298
+51 0x0000000000141c43 _PyFunction_Vectorcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:435
+52 0x000000000013c716 _PyObject_FastCallDict()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:96
+53 0x0000000000148164 _PyObject_Call_Prepend()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:887
+54 0x00000000001ce4f9 slot_tp_call()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/typeobject.c:6553
+55 0x000000000013ce61 _PyObject_MakeTpCall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/Objects/call.c:159
+56 0x0000000000139c6b _PyObject_Vectorcall()  /dev/shm/jkrometi/build/Python/3.8.6/GCCcore-10.2.0/Python-3.8.6/./Include/cpython/abstract.h:125
+=================================
+[tc-gpu004:24423] *** Process received signal ***
+[tc-gpu004:24423] Signal: Aborted (6)
+[tc-gpu004:24423] Signal code:  (-6)
+[tc-gpu004:24423] [ 0] /lib64/libpthread.so.0(+0xf5f0)[0x2aaaab7c65f0]
+[tc-gpu004:24423] [ 1] /lib64/libc.so.6(gsignal+0x37)[0x2aaaabc0c337]
+[tc-gpu004:24423] [ 2] /lib64/libc.so.6(abort+0x148)[0x2aaaabc0da28]
+[tc-gpu004:24423] [ 3] /apps/easybuild/software/tinkercliffs-rome_a100/UCX/1.9.0-GCCcore-10.2.0/lib/libucs.so.0(ucs_fatal_error_message+0x6d)[0x2aaaae06422d]
+[tc-gpu004:24423] [ 4] /apps/easybuild/software/tinkercliffs-rome_a100/UCX/1.9.0-GCCcore-10.2.0/lib/libucs.so.0(+0x22c0f)[0x2aaaae067c0f]
+[tc-gpu004:24423] [ 5] /apps/easybuild/software/tinkercliffs-rome_a100/UCX/1.9.0-GCCcore-10.2.0/lib/libucs.so.0(ucs_log_dispatch+0xd1)[0x2aaaae067d31]
+[tc-gpu004:24423] [ 6] /apps/easybuild/software/tinkercliffs-rome_a100/UCX/1.9.0-GCCcore-10.2.0/lib/ucx/libuct_ib.so.0(uct_ib_mlx5_completion_with_err+0x511)[0x2aaaaf270001]
+[tc-gpu004:24423] [ 7] /apps/easybuild/software/tinkercliffs-rome_a100/UCX/1.9.0-GCCcore-10.2.0/lib/ucx/libuct_ib.so.0(+0x304ba)[0x2aaaaf27f4ba]
+[tc-gpu004:24423] [ 8] /apps/easybuild/software/tinkercliffs-rome_a100/UCX/1.9.0-GCCcore-10.2.0/lib/ucx/libuct_ib.so.0(uct_rc_mlx5_iface_progress+0x4f2)[0x2aaaaf280d02]
+[tc-gpu004:24423] [ 9] /apps/easybuild/software/tinkercliffs-rome_a100/UCX/1.9.0-GCCcore-10.2.0/lib/libucp.so.0(ucp_worker_progress+0x5a)[0x2aaaadf97c9a]
+[tc-gpu004:24423] [10] /apps/easybuild/software/tinkercliffs-rome_a100/OpenMPI/4.0.5-GCC-10.2.0/lib/libopen-pal.so.40(opal_progress+0x33)[0x2aaaac768643]
+[tc-gpu004:24423] [11] /apps/easybuild/software/tinkercliffs-rome_a100/OpenMPI/4.0.5-GCC-10.2.0/lib/libopen-pal.so.40(ompi_sync_wait_mt+0xb5)[0x2aaaac76eaa5]
+[tc-gpu004:24423] [12] /apps/easybuild/software/tinkercliffs-rome_a100/OpenMPI/4.0.5-GCC-10.2.0/lib/libmpi.so.40(ompi_request_default_wait+0x20b)[0x2aaaac5a755b]
+[tc-gpu004:24423] [13] /apps/easybuild/software/tinkercliffs-rome_a100/OpenMPI/4.0.5-GCC-10.2.0/lib/libmpi.so.40(PMPI_Wait+0x54)[0x2aaaac5e6f04]
+[tc-gpu004:24423] [14] /apps/easybuild/software/tinkercliffs-rome_a100/SciPy-bundle/2020.11-fosscuda-2020b/lib/python3.8/site-packages/mpi4py/MPI.cpython-38-x86_64-linux-gnu.so(+0x45856)[0x2aaaac42c856]
+[tc-gpu004:24423] [15] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(+0x1429d4)[0x2aaaaae119d4]
+[tc-gpu004:24423] [16] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(_PyEval_EvalFrameDefault+0x5f9)[0x2aaaaae038f9]
+[tc-gpu004:24423] [17] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(+0x141f2a)[0x2aaaaae10f2a]
+[tc-gpu004:24423] [18] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(PyVectorcall_Call+0x5d)[0x2aaaaae19e3d]
+[tc-gpu004:24423] [19] /apps/easybuild/software/tinkercliffs-rome_a100/PyTorch/1.7.1-fosscuda-2020b/lib/python3.8/site-packages/torch/lib/libtorch_python.so(_Z17THPFunction_applyP7_objectS0_+0x95d)[0x2aab1adb363d]
+[tc-gpu004:24423] [20] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(+0x145825)[0x2aaaaae14825]
+[tc-gpu004:24423] [21] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(_PyObject_MakeTpCall+0x81)[0x2aaaaae0be61]
+[tc-gpu004:24423] [22] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(_PyEval_EvalFrameDefault+0x596b)[0x2aaaaae08c6b]
+[tc-gpu004:24423] [23] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(+0x141f2a)[0x2aaaaae10f2a]
+[tc-gpu004:24423] [24] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(+0x14aa7e)[0x2aaaaae19a7e]
+[tc-gpu004:24423] [25] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(PyVectorcall_Call+0x5d)[0x2aaaaae19e3d]
+[tc-gpu004:24423] [26] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(_PyEval_EvalFrameDefault+0x2ed9)[0x2aaaaae061d9]
+[tc-gpu004:24423] [27] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(_PyEval_EvalCodeWithName+0x2e1)[0x2aaaaae02111]
+[tc-gpu004:24423] [28] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(_PyFunction_Vectorcall+0xc3)[0x2aaaaae10c43]
+[tc-gpu004:24423] [29] /apps/easybuild/software/tinkercliffs-rome_a100/Python/3.8.6-GCCcore-10.2.0/lib/libpython3.8.so.1.0(_PyObject_FastCallDict+0x46)[0x2aaaaae0b716]
+[tc-gpu004:24423] *** End of error message ***
+--------------------------------------------------------------------------
+Primary job  terminated normally, but 1 process returned
+a non-zero exit code. Per user-direction, the job has been aborted.
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+mpirun noticed that process rank 2 with PID 24423 on node tc-gpu004 exited on signal 6 (Aborted).
+--------------------------------------------------------------------------

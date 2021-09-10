@@ -9,14 +9,17 @@ GPT model:
 
 import math
 import logging
+import time
 
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from mpi4py import MPI
 import distdl
 from distdl.utilities.slicing import compute_subshape
 from dist_mingpt.utils import make_partition
+from distdl.utilities.torch import zero_volume_tensor
 
 
 logger = logging.getLogger(__name__)
@@ -48,9 +51,9 @@ class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.bc = distdl.nn.Broadcast(config.P_input, config.P_attn)
-        self.sr = distdl.nn.SumReduce(config.P_attn, config.P_input)
-        self.P_input = config.P_attn
+        self.bc = distdl.nn.Broadcast(config.P_input, config.P_model)
+        self.sr = distdl.nn.SumReduce(config.P_model, config.P_input)
+        self.P_input = config.P_model
         self.config = config
         # compute the local n_embd and n_head
         assert config.n_embd % config.M == 0
@@ -110,18 +113,18 @@ class Block(nn.Module):
         self.ln2 = nn.LayerNorm(config.n_embd)
         self.attn = CausalSelfAttention(config)
         self.P_input = config.P_input
-        self.P_mlp_hidden = config.P_mlp_hidden
+        self.P_model = config.P_model
 
         # compute local linear layer size
         assert (config.n_embd * 4) % config.M == 0
         local_hidden_features = (config.n_embd * 4) // config.M
 
         self.mlp = nn.Sequential(
-            distdl.nn.Broadcast(config.P_input, config.P_mlp_hidden),
+            distdl.nn.Broadcast(config.P_input, config.P_model),
             nn.Linear(config.n_embd, local_hidden_features),
             nn.GELU(),
             nn.Linear(local_hidden_features, config.n_embd),
-            distdl.nn.SumReduce(config.P_mlp_hidden, config.P_input),
+            distdl.nn.SumReduce(config.P_model, config.P_input),
             nn.Dropout(config.resid_pdrop),
         )
 
@@ -135,21 +138,37 @@ class GPT(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        self.config = config
 
         # input embedding stem
-        self.tok_emb = nn.Embedding(config.vocab_size, config.n_embd)
-        self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd))
+        assert config.vocab_size % config.M == 0
+        self.bc1 = distdl.nn.Broadcast(config.P_input2d, config.P_model2d)
+        self.tok_emb = nn.Embedding(config.vocab_size, config.n_embd // config.M)
+        self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd // config.M))
         self.drop = nn.Dropout(config.embd_pdrop)
+        self.tp1 = distdl.nn.DistributedTranspose(config.P_model, config.P_input)
+
         # transformer
         self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
-        # decoder head
-        self.ln_f = nn.LayerNorm(config.n_embd)
-        self.head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+
+        if config.P_input.active:
+            # decoder head
+            self.ln_f = nn.LayerNorm(config.n_embd)
+        self.bc2 = distdl.nn.Broadcast(config.P_input, config.P_model)
+        self.head = nn.Linear(config.n_embd, config.vocab_size // config.M, bias=False)
+        # TODO: combine this step with the loss
+        self.tp2 = distdl.nn.DistributedTranspose(config.P_model, config.P_input)
 
         self.block_size = config.block_size
         self.apply(self._init_weights)
 
-        logger.info("number of parameters: %e", sum(p.numel() for p in self.parameters()))
+        # We need to combine the results to print this out properly:
+        local_param_count = sum(p.numel() for p in self.parameters())
+        print(f'Parameters local to rank {config.P_model.rank}:', local_param_count)
+        local_param_counts = config.P_model._comm.gather(local_param_count, root=0)
+        config.P_model._comm.Barrier()
+        if config.P_model.rank == 0:
+            print("total number of parameters:", sum(local_param_counts))
 
     def get_block_size(self):
         return self.block_size
@@ -210,21 +229,35 @@ class GPT(nn.Module):
         return optimizer
 
     def forward(self, idx, targets=None):
-        b, t = idx.size()
-        assert t <= self.block_size, "Cannot forward, model block size is exhausted."
 
         # forward the GPT model
+        idx = self.bc1(idx)
+        b, t = idx.size()
+        assert t <= self.block_size, "Cannot forward, model block size is exhausted."
         token_embeddings = self.tok_emb(idx) # each index maps to a (learnable) vector
         position_embeddings = self.pos_emb[:, :t, :] # each position maps to a (learnable) vector
         x = self.drop(token_embeddings + position_embeddings)
+        x = self.tp1(x)
+
+        # all workers participate here for the bulk of the operations here
         x = self.blocks(x)
-        x = self.ln_f(x)
+
+        if self.config.P_input.active:
+            x = self.ln_f(x)
+
+        x = self.bc2(x)
         logits = self.head(x)
+        x = self.tp2(x)
 
-        # if we are given some desired targets also calculate the loss
-        loss = None
-        if targets is not None:
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        if self.config.P_input.active:
+            # if we are given some desired targets also calculate the loss
+            loss = None
+            if targets is not None:
+                assert False, 'TODO!'
+                loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
-        return logits, loss
+            return logits, loss
+
+        else:
+            return None, None
 
