@@ -16,32 +16,32 @@ import logging
 vocab_size = 51200
 block_size = 1024
 batch_size = 1
-n_head = 24
-n_layer = 35
+n_head = 20
+n_layer = 24
 n_embd = 96 * n_head
 
 # set up partitions and devices
 D = 1
-M = 4
+M = 2
 rank = MPI.COMM_WORLD.Get_rank()
 size = MPI.COMM_WORLD.Get_size()
 assert D * M == size
-P_world = distdl.backends.mpi.Partition(MPI.COMM_WORLD)
-P_input_base = P_world.create_partition_inclusive(np.arange(D))
-P_input = P_input_base.create_cartesian_topology_partition([D, 1, 1])
-P_model_base = P_world.create_partition_inclusive(np.arange(D*M))
-P_model = P_model_base.create_cartesian_topology_partition([D, 1, M])
-P_input2d_base = P_world.create_partition_inclusive(np.arange(D))
-P_input2d = P_input2d_base.create_cartesian_topology_partition([D, 1])
-P_model2d_base = P_world.create_partition_inclusive(np.arange(D*M))
-P_model2d = P_model2d_base.create_cartesian_topology_partition([D, M])
+#P_world = distdl.backends.mpi.Partition(MPI.COMM_WORLD)
+#P_input_base = P_world.create_partition_inclusive(np.arange(D))
+#P_input = P_input_base.create_cartesian_topology_partition([D, 1, 1])
+#P_model_base = P_world.create_partition_inclusive(np.arange(D*M))
+#P_model = P_model_base.create_cartesian_topology_partition([D, 1, M])
+#P_input2d_base = P_world.create_partition_inclusive(np.arange(D))
+#P_input2d = P_input2d_base.create_cartesian_topology_partition([D, 1])
+#P_model2d_base = P_world.create_partition_inclusive(np.arange(D*M))
+#P_model2d = P_model2d_base.create_cartesian_topology_partition([D, M])
 
-#P_input      = make_partition(shape=[D, 1, 1])
-#P_model      = make_partition(shape=[D, 1, M])
-#P_input2d    = make_partition(shape=[D, 1, 1])
-#P_model2d    = make_partition(shape=[D, 1, M])
+P_input      = make_partition(shape=[D, 1, 1])
+P_model      = make_partition(shape=[D, 1, M])
+P_input2d    = make_partition(shape=[D, 1, 1])
+P_model2d    = make_partition(shape=[D, 1, M])
 #device = torch.device('cpu')
-device = torch.device('cuda:' + str(rank % 8))
+device = torch.device('cuda:' + str(rank % 1))
 
 # set up the model
 config = GPTConfig(vocab_size, block_size,
@@ -75,4 +75,4 @@ if rank == 0:
     # scrap the first two to avoid the warmup cost
     times = times[2:]
     print(f'average {np.mean(times):0.4f} seconds', flush=True)
-time.sleep(60)
+#time.sleep(60)

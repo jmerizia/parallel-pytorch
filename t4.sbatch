@@ -2,7 +2,7 @@
 
 # auto-generated script DO NOT EDIT MANUALLY
 
-#SBATCH --nodes 8
+#SBATCH --nodes 1
 #SBATCH --ntasks-per-node 1
 #SBATCH --time 00:10:00
 #SBATCH --partition t4_normal_q
@@ -22,5 +22,5 @@ module load PyTorch/1.7.1-fosscuda-2020b
 module load mpi4py/3.1.1-gompi-2020b-timed-pingpong
 #pip install -e ~/git/distdl
 
-mpirun --n 8 python -B -m mpi4py benchmark.py
+mpirun --n 1 python -B -m mpi4py speed-bork.py
 

@@ -1,1 +1,1 @@
-mpirun -n 2 python -m mpi4py benchmark.py
+mpirun -n 8 python -m mpi4py speed-bork.py
