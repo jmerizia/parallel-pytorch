@@ -7,9 +7,14 @@ from distdl.utilities.slicing import compute_subshape
 import torch
 import numpy as np
 import time
+import torch.distributed as dist
+import deepspeed
 
 from dist_mingpt.model import GPTConfig, Block, CausalSelfAttention
 
+deepspeed.init_distributed()
+
+use_cuda = False
 vocab_size = 51200
 block_size = 1024
 batch_size = 1
@@ -33,8 +38,17 @@ P_input2d = P_input2d_base.create_cartesian_topology_partition([D, 1])
 P_model2d_base = P_world.create_partition_inclusive(np.arange(D*M))
 P_model2d = P_model2d_base.create_cartesian_topology_partition([D, M])
 
-#device = torch.device('cuda:' + str(rank % 1))
-device = torch.device('cpu')
+if use_cuda:
+    device = torch.device('cuda:' + str(rank % 1))
+else:
+    device = torch.device('cpu')
+
+class BC(torch.nn.Module):
+    def __init__(self, config):
+        super().__init__()
+
+    def forward(self, input):
+        dist
 
 # set up the model
 config = GPTConfig(vocab_size, block_size,
@@ -56,14 +70,15 @@ assert batch_size % D == 0
 if P_input.active:
     x = torch.zeros([batch_size // D, config.block_size, config.n_embd]) 
 else:
-    x = zero_volume_tensor(device=device)
+    x = zero_volume_tensor().to(device)
 
 times = []
 for idx in range(12):
     MPI.COMM_WORLD.Barrier()
     st = time.time()
     y = mlp(x)
-    torch.cuda.synchronize()
+    if use_cuda:
+        torch.cuda.synchronize()
     MPI.COMM_WORLD.Barrier()
     en = time.time()
     times.append(en-st)
