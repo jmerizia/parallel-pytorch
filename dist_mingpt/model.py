@@ -14,6 +14,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from dist_mingpt.utils import Broadcast, SumReduce
+
 logger = logging.getLogger(__name__)
 
 class GPTConfig:
@@ -81,15 +83,17 @@ class CausalSelfAttention(nn.Module):
 class Block(nn.Module):
     """ an unassuming Transformer block """
 
-    def __init__(self, config):
+    def __init__(self, config, comm):
         super().__init__()
         self.ln1 = nn.LayerNorm(config.n_embd)
         self.ln2 = nn.LayerNorm(config.n_embd)
         self.attn = CausalSelfAttention(config)
         self.mlp = nn.Sequential(
+            Broadcast(config.n_embd, comm, root=0),
             nn.Linear(config.n_embd, 4 * config.n_embd),
             nn.GELU(),
             nn.Linear(4 * config.n_embd, config.n_embd),
+            SumReduce(config.n_embd, comm, root=0),
             nn.Dropout(config.resid_pdrop),
         )
 
@@ -109,7 +113,7 @@ class GPT(nn.Module):
         self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd))
         self.drop = nn.Dropout(config.embd_pdrop)
         # transformer
-        self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
+        self.blocks = nn.Sequential(*[Block(config, comm) for _ in range(config.n_layer)])
         # decoder head
         self.ln_f = nn.LayerNorm(config.n_embd)
         self.head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
