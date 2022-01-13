@@ -12,8 +12,9 @@ class Pipeline(nn.Module):
     def __init__(self, stages, comm):
         self.comm = comm
         assert len(stages) == self.comm.Get_size()
+        rank = self.comm.Get_rank()
+        self.stage = stages[rank]
 
     def forward(self, x):
-        for stage in self.stages:
-            x = stage(x)
+
         return x
