@@ -64,6 +64,7 @@ class CausalSelfAttention(nn.Module):
         self.comm = comm
         size = self.comm.Get_size()
         assert config.n_embd % size == 0
+        assert config.n_head % size == 0
         assert (config.n_embd // size) % (config.n_head // size) == 0
         # key, query, value projections for all heads
         self.bc = Broadcast(comm)
