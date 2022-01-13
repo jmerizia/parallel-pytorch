@@ -11,3 +11,4 @@ todo list
     - [ ] minGPT
     - [ ] ViT
     - [ ] GPT-J
+- [ ] tests for correctness across various scales
