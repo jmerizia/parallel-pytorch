@@ -15,7 +15,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from dist_mingpt.utils import Broadcast, SumReduce
+from parallel_pytorch.layers import DistributedEmbedding
+from parallel_pytorch.ops import Broadcast, SumReduce
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +32,25 @@ class GPTConfig:
         for k,v in kwargs.items():
             setattr(self, k, v)
 
-class GPT1Config(GPTConfig):
-    """ GPT-1 like network roughly 125M params """
-    n_layer = 12
-    n_head = 12
-    n_embd = 768
+class MLP(nn.Module):
+    def __init__(self, config, comm):
+        super().__init__()
+        self.comm = comm
+        self.config = config
+        size = self.comm.Get_size()
+        D = self.config.n_embd
+        assert (4 * D) % size == 0
+        self.mlp = nn.Sequential(
+            Broadcast(comm),
+            nn.Linear(D, 4 * D // size),
+            nn.ReLU(),
+            nn.Linear(4 * D // size, D),
+            SumReduce(comm),
+        )
+
+    def forward(self, x):
+        return self.mlp(x)
+
 
 class CausalSelfAttention(nn.Module):
     """
@@ -44,37 +59,35 @@ class CausalSelfAttention(nn.Module):
     explicit implementation here to show that there is nothing too scary here.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, comm):
         super().__init__()
-        self.P_input = config.P_model
-        self.config = config
-        # compute the local n_embd and n_head
-        assert config.n_embd % config.M == 0
-        assert config.n_head % config.M == 0
-        local_n_embd = config.n_embd // config.M
-        local_n_head = config.n_head // config.M
-
-        assert local_n_embd % local_n_head == 0
+        self.comm = comm
+        size = self.comm.Get_size()
+        assert config.n_embd % size == 0
+        assert (config.n_embd // size) % (config.n_head // size) == 0
         # key, query, value projections for all heads
-        self.key = nn.Linear(config.n_embd, local_n_embd)
-        self.query = nn.Linear(config.n_embd, local_n_embd)
-        self.value = nn.Linear(config.n_embd, local_n_embd)
+        self.bc = Broadcast(comm)
+        self.key = nn.Linear(config.n_embd, config.n_embd // size)
+        self.query = nn.Linear(config.n_embd, config.n_embd // size)
+        self.value = nn.Linear(config.n_embd, config.n_embd // size)
         # regularization
         self.attn_drop = nn.Dropout(config.attn_pdrop)
         self.resid_drop = nn.Dropout(config.resid_pdrop)
         # output projection
-        self.proj = nn.Linear(local_n_embd, config.n_embd)
+        self.proj = nn.Linear(config.n_embd // size, config.n_embd)
+        self.sr = SumReduce(comm)
         # causal mask to ensure that attention is only applied to the left in the input sequence
         self.register_buffer("mask", torch.tril(torch.ones(config.block_size, config.block_size))
                                      .view(1, 1, config.block_size, config.block_size))
-        self.local_n_head = local_n_head
+        self.local_n_head = config.n_head // size
 
     def forward(self, x, layer_past=None):
 
+        x = self.bc(x)
+
         B, T, C = x.size()
 
-        # we are working with the feature dimension partitioned into M parts, so we divide C by M
-        C //= self.config.M
+        C //= self.comm.Get_size()
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         k = self.key(x).view(B, T, self.local_n_head, C // self.local_n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -91,8 +104,8 @@ class CausalSelfAttention(nn.Module):
 
         # output projection
         y = self.proj(y)
-        if self.P_input.active:
-            y = self.resid_drop(y)
+        y = self.sr(y)
+        y = self.resid_drop(y)
         return y
 
 class Block(nn.Module):
@@ -102,39 +115,24 @@ class Block(nn.Module):
         super().__init__()
         self.ln1 = nn.LayerNorm(config.n_embd)
         self.ln2 = nn.LayerNorm(config.n_embd)
-        self.attn = CausalSelfAttention(config)
-        self.P_input = config.P_input
-        self.P_model = config.P_model
-
-        # compute local linear layer size
-        assert (config.n_embd * 4) % config.M == 0
-        local_hidden_features = (config.n_embd * 4) // config.M
-
-        self.mlp = nn.Sequential(
-            Broadcast(config.n_embd, comm, root=0),
-            nn.Linear(config.n_embd, 4 * config.n_embd),
-            nn.GELU(),
-            nn.Linear(4 * config.n_embd, config.n_embd),
-            SumReduce(config.n_embd, comm, root=0),
-            nn.Dropout(config.resid_pdrop),
-        )
+        self.attn = CausalSelfAttention(config, comm)
+        self.mlp = MLP(config, comm)
 
     def forward(self, x):
-        x = (x if self.P_input.active else 0) + self.attn(self.ln1(x) if self.P_input.active else x)
-        x = (x if self.P_input.active else 0) + self.mlp(self.ln2(x) if self.P_input.active else x)
+        x = x + self.attn(self.ln1(x))
+        x = x + self.mlp(self.ln2(x))
         return x
 
 class GPT(nn.Module):
     """  the full GPT language model, with a context size of block_size """
 
-    def __init__(self, config):
+    def __init__(self, config, comm):
         super().__init__()
         self.config = config
+        self.comm = comm
 
         # input embedding stem
-        assert config.vocab_size % config.M == 0
-        self.tok_emb = nn.Embedding(config.vocab_size, config.n_embd // config.M)
-        self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd // config.M))
+        self.emb = DistributedEmbedding(comm, config)
         self.drop = nn.Dropout(config.embd_pdrop)
 
         # transformer
@@ -146,13 +144,10 @@ class GPT(nn.Module):
         self.block_size = config.block_size
         self.apply(self._init_weights)
 
-        # We need to combine the results to print this out properly:
         local_param_count = sum(p.numel() for p in self.parameters())
-        print(f'Parameters local to rank {config.P_model.rank}:', local_param_count)
-        local_param_counts = config.P_model._comm.gather(local_param_count, root=0)
-        config.P_model._comm.Barrier()
-        if config.P_model.rank == 0:
-            print("total number of parameters:", sum(local_param_counts))
+        param_count = comm.allreduce(local_param_count)
+        if comm.Get_rank() == 0:
+            logger.info("number of parameters: %e", param_count)
 
     def get_block_size(self):
         return self.block_size
@@ -194,7 +189,7 @@ class GPT(nn.Module):
                     no_decay.add(fpn)
 
         # special case the position embedding parameter in the root GPT module as not decayed
-        no_decay.add('pos_emb')
+        no_decay.add('emb.pos_emb')
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters()}
@@ -213,31 +208,20 @@ class GPT(nn.Module):
         return optimizer
 
     def forward(self, idx, targets=None):
-
-        # forward the GPT model
         b, t = idx.size()
         assert t <= self.block_size, "Cannot forward, model block size is exhausted."
-        token_embeddings = self.tok_emb(idx) # each index maps to a (learnable) vector
-        position_embeddings = self.pos_emb[:, :t, :] # each position maps to a (learnable) vector
-        x = self.drop(token_embeddings + position_embeddings)
 
-        # all workers participate here for the bulk of the operations here
+        # forward the GPT model
+        x = self.emb(idx)
+        x = self.drop(x)
         x = self.blocks(x)
-
-        if self.config.P_input.active:
-            x = self.ln_f(x)
-
+        x = self.ln_f(x)
         logits = self.head(x)
 
-        if self.config.P_input.active:
-            # if we are given some desired targets also calculate the loss
-            loss = None
-            if targets is not None:
-                assert False, 'TODO!'
-                loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        # if we are given some desired targets also calculate the loss
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
-            return logits, loss
-
-        else:
-            return None, None
+        return logits, loss
 

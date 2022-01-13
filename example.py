@@ -1,88 +1,65 @@
-import torch
+import random
 from mpi4py import MPI
-from dist_mingpt.utils import Broadcast, SumReduce
+import torch.optim as optim
+import numpy as np
+import math
+import torch
+import torch.nn as nn
+from torch.nn import functional as F
+from parallel_pytorch.models.minGPT import GPT, GPTConfig
 
 
-torch.seed(0)
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
+torch.manual_seed(rank)
+random.seed(rank)
+np.random.seed(rank)
 
-class MLP(torch.nn.Module):
-    def __init__(self, D, comm):
-        super().__init__()
-        self.comm = comm
-        self.D = D
-        size = self.comm.Get_size()
-        assert (4 * D) % size == 0
-        self.mlp = torch.nn.Sequential(
-            Broadcast(comm, 0),
-            torch.nn.Linear(D, 4 * D // size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(4 * D // size, D, with_bias=False),
-            SumReduce(comm, 0),
-        )
+# a = torch.ones(4, 4)
+# b = torch.ones(4, 4)
+# print(torch.logical_or(a < 10, b > 10))
+# quit()
 
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, torch.nn.Linear):
-                m.weight.data.normal_(0, 0.1)
-                m.bias.data.zero_()
+config = GPTConfig(
+    vocab_size=17,  # this are usually of weird length
+    block_size=4,
+    n_layer=2,
+    n_head=4,
+    n_embd=4,
+)
 
-    def forward(self, x):
-        return x
+class TrainConfig:
+    batch_size = 64
+    learning_rate = 0.1
+    weight_decay = 0.1
+    betas = (0.9, 0.95)
 
-D = 2
-assert (4 * D) % size == 0
-net_dist = MLP()
+    def __init__(self, **kwargs):
+        for k,v in kwargs.items():
+            setattr(self, k, v)
 
-if rank == 0:
-    net_seq = torch.nn.Sequential(
-        torch.nn.Linear(D, 4 * D),
-        torch.nn.ReLU(),
-        torch.nn.Linear(4 * D, D),
-    )
+train_config = TrainConfig()
 
-# set the weight and bias
-if rank == 0:
-    w1 = torch.ones([D * 4, D])
-    b1 = torch.ones([D * 4])
-    w2 = torch.ones([D, D * 4])
-    b2 = torch.ones([D])
-else:
-    w1, b1, w2, b2 = None, None, None, None
-w1 = comm.bcast(w1, root=0)
-b1 = comm.bcast(b1, root=0)
-w2 = comm.bcast(w2, root=0)
-b2 = comm.bcast(b2, root=0)
-k = 4 * D // size
-net_dist[1].weight.data = w1[rank * k : (rank + 1) * k, :]
-net_dist[1].bias.data = b1[rank * k : (rank + 1) * k]
-net_dist[2].weight.data = w2[:, rank * k : (rank + 1) * k]
-net_dist[2].bias.data = b2
+batch_size = 2
+model = GPT(config, comm)
+data = [
+    (
+        torch.randint(0, config.vocab_size, [batch_size, config.block_size], dtype=torch.long),
+        torch.randint(0, config.vocab_size, [batch_size, config.block_size], dtype=torch.long),
+    ) for _ in range(300)
+]
 
-if rank == 0:
-    net_seq[0].weight.data = w1
-    net_seq[0].bias.data = b1
-    net_seq[2].weight.data = w2
-    net_seq[2].bias.data = b2
-comm.Barrier()
+criterion = nn.MSELoss()
+optimizer = model.configure_optimizers(train_config)
 
-
-if rank == 0:
-    x = torch.ones(D)
-    dy = torch.ones(D)
-else:
-    x = torch.empty(0)
-    dy = torch.empty(0)
-x.requires_grad = True
-
-y1 = net_dist(x)
-print(rank, y1)
-if rank == 0:
-    y2 = net_seq(x)
-    print(rank, y2)
-quit()
-
-y.backward(dy)
-print(rank, x.grad)
+running_loss = 0
+for it, (x, y) in enumerate(data):
+    optimizer.zero_grad()
+    logits, loss = model(x, y)
+    loss.backward()
+    optimizer.step()
+    running_loss += loss.item()
+    if it % 10 == 9 and rank == 0:
+        print(f'iter {it} loss: {running_loss:.3f}')
+        running_loss = 0.0
