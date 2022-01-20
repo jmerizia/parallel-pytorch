@@ -12,3 +12,4 @@ todo list
     - [ ] ViT
     - [ ] GPT-J
 - [ ] tests for correctness across various scales
+- [ ] benchmark against existing solutions
