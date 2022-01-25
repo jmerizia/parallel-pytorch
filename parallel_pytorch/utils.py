@@ -2,6 +2,15 @@ from collections import defaultdict
 import torch
 from typing import Literal
 from mpi4py import MPI
+import random
+import numpy as np
+
+
+def set_seed(seed):
+    """ Set seeds everywhere. """
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
 
 
 def divide_optimally(n, parts):
@@ -11,12 +20,14 @@ def divide_optimally(n, parts):
 def global_rank():
     return MPI.COMM_WORLD.Get_rank()
 
+
 def compute_devices_per_node():
     comm = MPI.COMM_WORLD
     count = torch.cuda.device_count()
     counts = comm.allgather(count)
     assert len(set(counts)) == 1, "Some nodes have differing numbers of devices"
     return count
+
 
 class Topology:
     """

@@ -20,32 +20,24 @@ from parallel_pytorch.ops import Broadcast, SumReduce
 
 logger = logging.getLogger(__name__)
 
-class GPTConfig:
-    """ base GPT config, params common to all GPT versions """
-    embd_pdrop = 0.1
-    resid_pdrop = 0.1
-    attn_pdrop = 0.1
-
-    def __init__(self, vocab_size, block_size, **kwargs):
-        self.vocab_size = vocab_size
-        self.block_size = block_size
-        for k,v in kwargs.items():
-            setattr(self, k, v)
 
 class MLP(nn.Module):
-    def __init__(self, config, comm):
+    def __init__(
+        self,
+        topo,
+        n_embd,
+    ):
         super().__init__()
-        self.comm = comm
-        self.config = config
-        size = self.comm.Get_size()
-        D = self.config.n_embd
+        self.topo = topo
+        size = self.topo.comm_model.Get_size()
+        D = n_embd
         assert (4 * D) % size == 0
         self.mlp = nn.Sequential(
-            Broadcast(comm),
+            Broadcast(topo.comm_model),
             nn.Linear(D, 4 * D // size),
             nn.ReLU(),
             nn.Linear(4 * D // size, D),
-            SumReduce(comm),
+            SumReduce(topo.comm_model),
         )
 
     def forward(self, x):
@@ -59,28 +51,36 @@ class CausalSelfAttention(nn.Module):
     explicit implementation here to show that there is nothing too scary here.
     """
 
-    def __init__(self, config, comm):
+    def __init__(
+        self,
+        topo,
+        block_size,
+        n_embd,
+        n_head,
+        attn_pdrop,
+        resid_pdrop,
+    ):
         super().__init__()
-        self.comm = comm
-        size = self.comm.Get_size()
-        assert config.n_embd % size == 0
-        assert config.n_head % size == 0
-        assert (config.n_embd // size) % (config.n_head // size) == 0
+        self.topo = topo
+        size = topo.comm_model.Get_size()
+        assert n_embd % size == 0
+        assert n_head % size == 0
+        assert (n_embd // size) % (n_head // size) == 0
         # key, query, value projections for all heads
-        self.bc = Broadcast(comm)
-        self.key = nn.Linear(config.n_embd, config.n_embd // size)
-        self.query = nn.Linear(config.n_embd, config.n_embd // size)
-        self.value = nn.Linear(config.n_embd, config.n_embd // size)
+        self.bc = Broadcast(topo.comm_model)
+        self.key = nn.Linear(n_embd, n_embd // size)
+        self.query = nn.Linear(n_embd, n_embd // size)
+        self.value = nn.Linear(n_embd, n_embd // size)
         # regularization
-        self.attn_drop = nn.Dropout(config.attn_pdrop)
-        self.resid_drop = nn.Dropout(config.resid_pdrop)
+        self.attn_drop = nn.Dropout(attn_pdrop)
+        self.resid_drop = nn.Dropout(resid_pdrop)
         # output projection
-        self.proj = nn.Linear(config.n_embd // size, config.n_embd)
-        self.sr = SumReduce(comm)
+        self.proj = nn.Linear(n_embd // size, n_embd)
+        self.sr = SumReduce(topo.comm_model)
         # causal mask to ensure that attention is only applied to the left in the input sequence
-        self.register_buffer("mask", torch.tril(torch.ones(config.block_size, config.block_size))
-                                     .view(1, 1, config.block_size, config.block_size))
-        self.local_n_head = config.n_head // size
+        self.register_buffer("mask", torch.tril(torch.ones(block_size, block_size))
+                                     .view(1, 1, block_size, block_size))
+        self.local_n_head = n_head // size
 
     def forward(self, x, layer_past=None):
 
@@ -88,7 +88,7 @@ class CausalSelfAttention(nn.Module):
 
         B, T, C = x.size()
 
-        C //= self.comm.Get_size()
+        C //= self.topo.comm_model.Get_size()
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         k = self.key(x).view(B, T, self.local_n_head, C // self.local_n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -112,12 +112,16 @@ class CausalSelfAttention(nn.Module):
 class Block(nn.Module):
     """ an unassuming Transformer block """
 
-    def __init__(self, config, comm):
+    def __init__(
+        self,
+        topo,
+        n_embd,
+    ):
         super().__init__()
-        self.ln1 = nn.LayerNorm(config.n_embd)
-        self.ln2 = nn.LayerNorm(config.n_embd)
-        self.attn = CausalSelfAttention(config, comm)
-        self.mlp = MLP(config, comm)
+        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.LayerNorm(n_embd)
+        self.attn = CausalSelfAttention(topo)
+        self.mlp = MLP(topo)
 
     def forward(self, x):
         x = x + self.attn(self.ln1(x))
@@ -127,27 +131,34 @@ class Block(nn.Module):
 class GPT(nn.Module):
     """  the full GPT language model, with a context size of block_size """
 
-    def __init__(self, config, comm):
+    def __init__(
+        self,
+        topo,
+        block_size,
+        vocab_size,
+        n_embd,
+        embd_pdrop,
+        n_layer,
+    ):
         super().__init__()
-        self.config = config
-        self.comm = comm
+        self.topo = topo
 
         # input embedding stem
-        self.emb = DistributedEmbedding(comm, config)
-        self.drop = nn.Dropout(config.embd_pdrop)
+        self.emb = DistributedEmbedding(topo, block_size=block_size)
+        self.drop = nn.Dropout(embd_pdrop)
 
         # transformer
-        self.blocks = nn.Sequential(*[Block(config, comm) for _ in range(config.n_layer)])
+        self.blocks = nn.Sequential(*[Block(topo) for _ in range(n_layer)])
         # decoder head
-        self.ln_f = nn.LayerNorm(config.n_embd)
-        self.head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.ln_f = nn.LayerNorm(n_embd)
+        self.head = nn.Linear(n_embd, vocab_size, bias=False)
 
-        self.block_size = config.block_size
+        self.block_size = block_size
         self.apply(self._init_weights)
 
         local_param_count = sum(p.numel() for p in self.parameters())
-        param_count = comm.allreduce(local_param_count)
-        if comm.Get_rank() == 0:
+        param_count = topo.comm_model.allreduce(local_param_count)
+        if topo.comm_model.Get_rank() == 0:
             logger.info("number of parameters: %e", param_count)
 
     def get_block_size(self):
