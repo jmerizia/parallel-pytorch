@@ -11,23 +11,31 @@ class DistributedEmbedding(nn.Module):
     It uses the Megatron-LM style parallelization method by dividing over vocab space.
     """
 
-    def __init__(self, comm, config):
+    def __init__(
+        self,
+        comm,
+        block_size: int,
+        vocab_size: int,
+        n_embd: int,
+    ):
         super().__init__()
         self.comm = comm
-        self.config = config
+        self.block_size = block_size
+        self.vocab_size = vocab_size
+        self.n_embd = n_embd
         size = self.comm.Get_size()
         rank = self.comm.Get_rank()
-        parts = divide_optimally(config.vocab_size, size)
+        parts = divide_optimally(vocab_size, size)
         self.local_vocab_size = parts[rank]
         self.offset = ([0] + cumsum(parts))[rank]
-        self.tok_emb = nn.Embedding(self.local_vocab_size + 1, config.n_embd, 0)
+        self.tok_emb = nn.Embedding(self.local_vocab_size + 1, n_embd, 0)
         self.sr = SumReduce(comm)
-        self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd))
+        self.pos_emb = nn.Parameter(torch.zeros(1, block_size, n_embd))
 
     def forward(self, idx):
         b, t = idx.size()
         # ensure all indices are within range (we lose the PyTorch error message)
-        assert torch.all(0 <= idx) and torch.all(idx < self.config.vocab_size), "Token index is out of bounds"
+        assert torch.all(0 <= idx) and torch.all(idx < self.vocab_size), "Token index is out of bounds"
         # translate the token indices
         idx -= self.offset
         # if the token is out of bounds of the current rank's embedding matrix, ignore it
