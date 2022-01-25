@@ -13,3 +13,7 @@ todo list
     - [ ] GPT-J
 - [ ] tests for correctness across various scales
 - [ ] benchmark against existing solutions
+
+future performance improvements
+- [ ] only send input to the first pipeline stage
+- [ ] gradient checkpointing for pipeline
