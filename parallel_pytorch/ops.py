@@ -7,18 +7,21 @@ import torch
 import torch.nn as nn
 from mpi4py import MPI
 
+from utils import prep_tensor_for_mpi_op
+
 
 class _Broadcast(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x, comm):
         ctx.comm = comm
-        x = x.detach()
+        x = prep_tensor_for_mpi_op(x)
         ctx.comm.Bcast(x)
         return x
 
     @staticmethod
     def backward(ctx, grad):
+        grad = prep_tensor_for_mpi_op(grad)
         ctx.comm.Allreduce(sendbuf=MPI.IN_PLACE, recvbuf=grad, op=MPI.SUM)
         return grad, None
 
@@ -39,12 +42,13 @@ class _SumReduce(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, comm):
         ctx.comm = comm
-        x = x.detach()
+        x = prep_tensor_for_mpi_op(x)
         ctx.comm.Allreduce(sendbuf=MPI.IN_PLACE, recvbuf=x, op=MPI.SUM)
         return x
 
     @staticmethod
     def backward(ctx, grad):
+        grad = prep_tensor_for_mpi_op(grad)
         ctx.comm.Bcast(grad)
         return grad, None, None, None
 
@@ -65,12 +69,13 @@ class _Scatter(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, comm):
         ctx.comm = comm
-        x = x.detach()
+        x = prep_tensor_for_mpi_op(x)
         ctx.comm.Scatter(sendbuf=x, recvbuf=MPI.IN_PLACE, root=0)
         return x
 
     @staticmethod
     def backward(ctx, grad):
+        grad = prep_tensor_for_mpi_op(grad)
         ctx.comm.Gather(sendbuf=MPI.IN_PLACE, recvbuf=grad, root=0)
         return grad, None
 
@@ -92,18 +97,19 @@ class _Gather(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, comm):
         ctx.comm = comm
-        x = x.detach()
+        x = prep_tensor_for_mpi_op(x)
         ctx.comm.Gather(sendbuf=MPI.IN_PLACE, recvbuf=x, root=0)
         return x
 
     @staticmethod
     def backward(ctx, grad):
+        grad = prep_tensor_for_mpi_op(grad)
         ctx.comm.Scatter(sendbuf=grad, recvbuf=MPI.IN_PLACE, root=0)
         return grad, None
 
 
 class Gather(nn.Module):
-    """ Gather all tensors (of same shape) to shape (workers, ...)  on root """
+    """ Gather all tensors (of same shape) to shape (workers, ...) on root """
 
     def __init__(self, comm):
         super().__init__()

@@ -11,12 +11,14 @@ def divide_optimally(n, parts):
 def global_rank():
     return MPI.COMM_WORLD.Get_rank()
 
+
 def compute_devices_per_node():
     comm = MPI.COMM_WORLD
     count = torch.cuda.device_count()
     counts = comm.allgather(count)
     assert len(set(counts)) == 1, "Some nodes have differing numbers of devices"
     return count
+
 
 class Topology:
     """
@@ -43,7 +45,24 @@ class Topology:
         return self.pipeline_comm.Get_size() // self.mp
 
     def get_num_pipeline_stages(self):
-        self.num_stages = self.pipeline_comm.Get_size() // self.model_comm.Get_size()
+        return self.pipeline_comm.Get_size() // self.model_comm.Get_size()
+
+    def get_pipeline_rank_of_next_stage(self):
+        assert self.get_pipeline_stage_idx() + 1 < self.get_num_pipeline_stages()
+        return self.pipeline_comm.Get_rank() + self.model_comm.Get_size()
+
+    def get_pipeline_rank_of_prev_stage(self):
+        assert 0 < self.get_pipeline_stage_idx()
+        return self.pipeline_comm.Get_rank() - self.model_comm.Get_size()
+        
 
 def cumsum(l):
     return [sum(l[:i+1]) for i in range(len(l))]
+
+
+def prep_tensor_for_mpi_op(t):
+    t = t.detach()
+    t = t.contiguous()
+    if t.is_cuda:
+        torch.cuda.current_stream().synchronize()
+    return t
