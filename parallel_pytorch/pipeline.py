@@ -5,7 +5,6 @@ A simple pipeline scheduler that plays nicely with PyTorch.
 from collections import deque
 from typing import List
 import torch.nn as nn
-from mpi4py import MPI
 
 from parallel_pytorch.utils import Topology, prep_tensor_for_mpi_op
 
