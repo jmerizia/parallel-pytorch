@@ -32,6 +32,17 @@ future performance improvements
 ## Citations
 
 ```bibtex
+@misc{shoeybi2020megatronlm,
+      title={Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism}, 
+      author={Mohammad Shoeybi and Mostofa Patwary and Raul Puri and Patrick LeGresley and Jared Casper and Bryan Catanzaro},
+      year={2020},
+      eprint={1909.08053},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL}
+}
+```
+
+```bibtex
 @misc{rajbhandari2020zero,
       title={ZeRO: Memory Optimizations Toward Training Trillion Parameter Models}, 
       author={Samyam Rajbhandari and Jeff Rasley and Olatunji Ruwase and Yuxiong He},
