@@ -25,7 +25,6 @@ more niche things
 - [ ] enable sending arbitrary objects in pipeline scheduler
 
 future performance improvements
-- [ ] only send input to the first pipeline stage
 - [ ] gradient checkpointing for pipeline
 
 ## Citations
