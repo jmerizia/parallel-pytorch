@@ -1,4 +1,7 @@
-This is a collection of various PyTorch models implemented with full 3D-parallelism, along with some helpful utilities.
+<img src="./3d.png" width="500px"></img>
+<a href="https://www.microsoft.com/en-us/research/blog/deepspeed-extreme-scale-model-training-for-everyone/">image source</a>
+
+A (WIP) collection of various PyTorch models implemented with full 3D-parallelism, along with some helpful utilities.
 
 todo list
 
