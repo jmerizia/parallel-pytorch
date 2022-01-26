@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
+from parallel_pytorch.topology import Topology
 
-from parallel_pytorch.utils import cumsum, divide_optimally
+from parallel_pytorch.utils import cumsum, split_number
 from parallel_pytorch.ops import SumReduce
 
 
@@ -13,23 +14,23 @@ class DistributedEmbedding(nn.Module):
 
     def __init__(
         self,
-        comm,
+        topo: Topology,
         block_size: int,
         vocab_size: int,
         n_embd: int,
     ):
         super().__init__()
-        self.comm = comm
+        self.topo = topo
         self.block_size = block_size
         self.vocab_size = vocab_size
         self.n_embd = n_embd
-        size = self.comm.Get_size()
-        rank = self.comm.Get_rank()
-        parts = divide_optimally(vocab_size, size)
+        size = topo.model_comm.Get_size()
+        rank = topo.model_comm.Get_rank()
+        parts = split_number(vocab_size, size)
         self.local_vocab_size = parts[rank]
         self.offset = ([0] + cumsum(parts))[rank]
         self.tok_emb = nn.Embedding(self.local_vocab_size + 1, n_embd, 0)
-        self.sr = SumReduce(comm)
+        self.sr = SumReduce(topo.model_comm)
         self.pos_emb = nn.Parameter(torch.zeros(1, block_size, n_embd))
 
     def forward(self, idx):

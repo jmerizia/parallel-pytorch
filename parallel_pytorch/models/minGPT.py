@@ -18,7 +18,8 @@ from torch.nn import functional as F
 from parallel_pytorch.layers import DistributedEmbedding
 from parallel_pytorch.ops import Broadcast, SumReduce
 from parallel_pytorch.pipeline import Pipeline
-from parallel_pytorch.utils import split_list
+from parallel_pytorch.topology import Topology
+from parallel_pytorch.utils import global_rank, split_list
 
 logger = logging.getLogger(__name__)
 
@@ -26,20 +27,21 @@ logger = logging.getLogger(__name__)
 class MLP(nn.Module):
     def __init__(
         self,
-        topo,
-        n_embd,
+        *,
+        topo: Topology,
+        n_embd: int,
     ):
         super().__init__()
         self.topo = topo
-        size = self.topo.comm_model.Get_size()
+        size = self.topo.model_comm.Get_size()
         D = n_embd
         assert (4 * D) % size == 0
         self.mlp = nn.Sequential(
-            Broadcast(topo.comm_model),
+            Broadcast(topo.model_comm),
             nn.Linear(D, 4 * D // size),
             nn.ReLU(),
             nn.Linear(4 * D // size, D),
-            SumReduce(topo.comm_model),
+            SumReduce(topo.model_comm),
         )
 
     def forward(self, x):
@@ -55,21 +57,21 @@ class CausalSelfAttention(nn.Module):
 
     def __init__(
         self,
-        topo,
-        block_size,
-        n_embd,
-        n_head,
-        attn_pdrop,
-        resid_pdrop,
+        topo: Topology,
+        block_size: int,
+        n_embd: int,
+        n_head: int,
+        attn_pdrop: float,
+        resid_pdrop: float,
     ):
         super().__init__()
         self.topo = topo
-        size = topo.comm_model.Get_size()
+        size = topo.model_comm.Get_size()
         assert n_embd % size == 0
         assert n_head % size == 0
         assert (n_embd // size) % (n_head // size) == 0
         # key, query, value projections for all heads
-        self.bc = Broadcast(topo.comm_model)
+        self.bc = Broadcast(topo.model_comm)
         self.key = nn.Linear(n_embd, n_embd // size)
         self.query = nn.Linear(n_embd, n_embd // size)
         self.value = nn.Linear(n_embd, n_embd // size)
@@ -78,7 +80,7 @@ class CausalSelfAttention(nn.Module):
         self.resid_drop = nn.Dropout(resid_pdrop)
         # output projection
         self.proj = nn.Linear(n_embd // size, n_embd)
-        self.sr = SumReduce(topo.comm_model)
+        self.sr = SumReduce(topo.model_comm)
         # causal mask to ensure that attention is only applied to the left in the input sequence
         self.register_buffer("mask", torch.tril(torch.ones(block_size, block_size))
                                      .view(1, 1, block_size, block_size))
@@ -90,7 +92,7 @@ class CausalSelfAttention(nn.Module):
 
         B, T, C = x.size()
 
-        C //= self.topo.comm_model.Get_size()
+        C //= self.topo.model_comm.Get_size()
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         k = self.key(x).view(B, T, self.local_n_head, C // self.local_n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -116,14 +118,26 @@ class Block(nn.Module):
 
     def __init__(
         self,
-        topo,
-        n_embd,
+        *,
+        topo: Topology,
+        n_embd: int,
+        block_size: int,
+        n_head: int,
+        attn_pdrop: int,
+        resid_pdrop: int,
     ):
         super().__init__()
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
-        self.attn = CausalSelfAttention(topo)
-        self.mlp = MLP(topo)
+        self.attn = CausalSelfAttention(
+            topo=topo,
+            block_size=block_size,
+            n_embd=n_embd,
+            n_head=n_head,
+            attn_pdrop=attn_pdrop,
+            resid_pdrop=resid_pdrop,
+        )
+        self.mlp = MLP(topo=topo, n_embd=n_embd)
 
     def forward(self, x):
         x = x + self.attn(self.ln1(x))
@@ -131,40 +145,68 @@ class Block(nn.Module):
         return x
 
 class GPT(nn.Module):
-    """  the full GPT language model, with a context size of block_size """
+    """ the full GPT language model, with a context size of block_size """
 
     def __init__(
         self,
-        topo,
-        block_size,
-        vocab_size,
-        n_embd,
-        embd_pdrop,
-        n_layer,
+        *,
+        topo: Topology,
+        block_size: int,
+        vocab_size: int,
+        n_embd: int,
+        n_layer: int,
+        n_head: int,
+        embd_pdrop: float,
+        attn_pdrop: float,
+        resid_pdrop: float,
     ):
         super().__init__()
         self.topo = topo
 
-        # input embedding stem
-        self.emb = DistributedEmbedding(topo, block_size=block_size)
-        self.drop = nn.Dropout(embd_pdrop)
+        # input embedding stem (note how we don't reference in the module yet)
+        emb = DistributedEmbedding(
+            topo=topo,
+            block_size=block_size,
+            vocab_size=vocab_size,
+            n_embd=n_embd,
+        )
+        drop = nn.Dropout(embd_pdrop)
 
         # pipelined transformer
-        blocks = [Block(topo) for _ in range(n_layer)]
-        stages = split_list(blocks, topo.get_num_pipeline_stages())
-        stages = [nn.Sequential(*stage) for stage in stages]
-        self.pipeline = Pipeline(topo=topo, stages=stages)
+        blocks = [
+            Block(
+                topo=topo,
+                n_embd=n_embd,
+                block_size=block_size,
+                n_head=n_head,
+                attn_pdrop=attn_pdrop,
+                resid_pdrop=resid_pdrop,
+            )
+            for _ in range(n_layer)
+        ]
 
         # decoder head
-        self.ln_f = nn.LayerNorm(n_embd)
-        self.head = nn.Linear(n_embd, vocab_size, bias=False)
+        ln_f = nn.LayerNorm(n_embd)
+        head = nn.Linear(n_embd, vocab_size, bias=False)
+
+        # break model into pipeline stages
+        self.pipeline = Pipeline(
+            topo=topo,
+            layers=[
+                emb,
+                drop,
+                *blocks,
+                ln_f,
+                head
+            ]
+        )
 
         self.block_size = block_size
         self.apply(self._init_weights)
 
         local_param_count = sum(p.numel() for p in self.parameters())
-        param_count = topo.comm_model.allreduce(local_param_count)
-        if topo.comm_model.Get_rank() == 0:
+        param_count = topo.model_comm.allreduce(local_param_count)
+        if topo.model_comm.Get_rank() == 0:
             logger.info("number of parameters: %e", param_count)
 
     def get_block_size(self):
@@ -207,7 +249,8 @@ class GPT(nn.Module):
                     no_decay.add(fpn)
 
         # special case the position embedding parameter in the root GPT module as not decayed
-        no_decay.add('emb.pos_emb')
+        if self.topo.get_pipeline_stage_idx() == 0:
+            no_decay.add('pipeline.stage.0.pos_emb')
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters()}
@@ -230,11 +273,7 @@ class GPT(nn.Module):
         assert t <= self.block_size, "Cannot forward, model block size is exhausted."
 
         # forward the GPT model
-        x = self.emb(idx)
-        x = self.drop(x)
-        x = self.pipeline(x)
-        x = self.ln_f(x)
-        logits = self.head(x)
+        logits = self.pipeline(idx)
 
         # if we are given some desired targets also calculate the loss
         loss = None

@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch
 
 from parallel_pytorch.topology import Topology
-from parallel_pytorch.utils import prep_tensor_for_mpi_op, split_list
+from parallel_pytorch.utils import global_rank, prep_tensor_for_mpi_op, split_list
 
 
 def _pass_forward(topo: Topology, sendbuf, recvbuf, left_stage_idx, right_stage_idx):
@@ -31,7 +31,7 @@ def _pass_forward(topo: Topology, sendbuf, recvbuf, left_stage_idx, right_stage_
         topo.pipeline_comm.Send(buf=sendbuf, dest=next_rank)
         ret = recvbuf
     elif stage_idx == right_stage_idx - 1:
-        prev_rank = topo.get_pipeline_rank_of_next_stage()
+        prev_rank = topo.get_pipeline_rank_of_prev_stage()
         recvbuf = prep_tensor_for_mpi_op(recvbuf)
         topo.pipeline_comm.Recv(buf=recvbuf, source=prev_rank)
         ret = recvbuf
@@ -81,7 +81,7 @@ def _pass_forward_pickle(topo: Topology, obj, left_stage_idx, right_stage_idx):
     if left_stage_idx < stage_idx < right_stage_idx - 1:
         next_rank = topo.get_pipeline_rank_of_next_stage()
         prev_rank = topo.get_pipeline_rank_of_prev_stage()
-        left_neighbor_obj = topo.pipeline_comm.sendrecv(obj=obj, dest=next_rank, source=prev_rank)
+        left_neighbor_obj = topo.pipeline_comm.sendrecv(sendobj=obj, dest=next_rank, source=prev_rank)
     elif stage_idx == left_stage_idx:
         next_rank = topo.get_pipeline_rank_of_next_stage()
         topo.pipeline_comm.send(obj=obj, dest=next_rank)
@@ -113,13 +113,14 @@ def _pass_backward_pickle(topo: Topology, obj):
     return right_neighbor_obj
 
 
-class _Pipeline(nn.Module):
+class _Pipeline(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, micro_batches: List[torch.Tensor], topo: Topology, stage: nn.Module):
         inputs = []
         outputs = []
         buffer = None
+        final_output_buffer = None
         num_stages = topo.get_num_pipeline_stages()
         stage_idx = topo.get_pipeline_stage_idx()
         assert num_stages == len(micro_batches)
@@ -167,13 +168,29 @@ class _Pipeline(nn.Module):
                 left_stage_idx=left_stage_idx,
                 right_stage_idx=right_stage_idx
             )
+
+            print(global_rank(), it, len(inputs), len(outputs))
+            topo.pipeline_comm.Barrier()
+            if global_rank() == 0:
+                print('----')
             topo.pipeline_comm.Barrier()
 
         # broadcast the outputs in the last pipeline stage to all stages
         root = topo.get_pipeline_rank_of_last_stage()
-        out = torch.stack(outputs)
-        out = prep_tensor_for_mpi_op(out)
-        topo.pipeline_comm.Bcast(buf=out, root=root)
+        if stage_idx == num_stages - 1:
+            out = torch.stack(outputs)
+            out_shape = list(out.shape)
+        else:
+            out_shape = None
+        # make the output buffer
+        if final_output_buffer is None:
+            out_shape = topo.pipeline_comm.bcast(out_shape, root=root)
+            if stage_idx == num_stages - 1:
+                final_output_buffer = out
+            else:
+                final_output_buffer = torch.empty(out_shape)
+        final_output_buffer = prep_tensor_for_mpi_op(final_output_buffer)
+        topo.pipeline_comm.Bcast(buf=final_output_buffer, root=root)
 
         # save variables for backwards pass
         ctx.topo = topo
@@ -181,7 +198,7 @@ class _Pipeline(nn.Module):
         ctx.outputs = outputs
         ctx.buffer = buffer
 
-        return out
+        return final_output_buffer
 
     @staticmethod
     def backward(ctx, grads):
@@ -235,6 +252,7 @@ class Pipeline(nn.Module):
         topo: Topology,
         layers: List[nn.Module],
     ):
+        super().__init__()
         self.topo = topo
         stages = split_list(layers, topo.get_num_pipeline_stages())
         stages = [nn.Sequential(*stage) for stage in stages]

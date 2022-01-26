@@ -1,7 +1,7 @@
 from typing import Literal
 from mpi4py import MPI
 
-from utils import compute_devices_per_node
+from parallel_pytorch.utils import compute_devices_per_node
 
 
 class Topology:
@@ -26,7 +26,7 @@ class Topology:
         self.model_comm = self.pipeline_comm.Split(color=pipeline_rank // self.mp, key=pipeline_rank)
 
     def get_pipeline_stage_idx(self):
-        return self.pipeline_comm.Get_size() // self.mp
+        return self.pipeline_comm.Get_rank() // self.mp
 
     def get_num_pipeline_stages(self):
         return self.pipeline_comm.Get_size() // self.model_comm.Get_size()

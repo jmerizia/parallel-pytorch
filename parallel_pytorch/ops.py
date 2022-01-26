@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 from mpi4py import MPI
 
-from utils import prep_tensor_for_mpi_op
+from parallel_pytorch.utils import prep_tensor_for_mpi_op
 
 
 class _Broadcast(torch.autograd.Function):
