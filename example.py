@@ -4,7 +4,7 @@ from parallel_pytorch.models.minGPT import GPT
 from parallel_pytorch.utils import Topology, global_rank, set_seed
 
 
-topo = Topology(dp=1, pp=2, mp=1)
+topo = Topology(dp=1, pp=4, mp=1)
 set_seed(topo.data_comm.Get_rank())
 
 # configs

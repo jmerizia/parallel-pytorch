@@ -17,6 +17,8 @@ from torch.nn import functional as F
 
 from parallel_pytorch.layers import DistributedEmbedding
 from parallel_pytorch.ops import Broadcast, SumReduce
+from parallel_pytorch.pipeline import Pipeline
+from parallel_pytorch.utils import split_list
 
 logger = logging.getLogger(__name__)
 
@@ -147,8 +149,12 @@ class GPT(nn.Module):
         self.emb = DistributedEmbedding(topo, block_size=block_size)
         self.drop = nn.Dropout(embd_pdrop)
 
-        # transformer
-        self.blocks = nn.Sequential(*[Block(topo) for _ in range(n_layer)])
+        # pipelined transformer
+        blocks = [Block(topo) for _ in range(n_layer)]
+        stages = split_list(blocks, topo.get_num_pipeline_stages())
+        stages = [nn.Sequential(*stage) for stage in stages]
+        self.pipeline = Pipeline(topo=topo, stages=stages)
+
         # decoder head
         self.ln_f = nn.LayerNorm(n_embd)
         self.head = nn.Linear(n_embd, vocab_size, bias=False)
@@ -226,7 +232,7 @@ class GPT(nn.Module):
         # forward the GPT model
         x = self.emb(idx)
         x = self.drop(x)
-        x = self.blocks(x)
+        x = self.pipeline(x)
         x = self.ln_f(x)
         logits = self.head(x)
 
