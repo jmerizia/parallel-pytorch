@@ -5,7 +5,7 @@ image source:
 
 ## Parallel Pytorch
 
-A (WIP) collection of various PyTorch models implemented with full 3D-parallelism based on DeepSpeed/Megatron-ML, along with some helpful utilities.
+A (WIP) implementation of DeepSpeed/Megatron-ML style 3D parallelism, along with some models and helpful utilities.
 
 ## Todo
 
