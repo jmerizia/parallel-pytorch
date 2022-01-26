@@ -120,7 +120,6 @@ class _Pipeline(torch.autograd.Function):
         inputs = []
         outputs = []
         buffer = None
-        final_output_buffer = None
         num_stages = topo.get_num_pipeline_stages()
         stage_idx = topo.get_pipeline_stage_idx()
         assert num_stages == len(micro_batches)
@@ -171,22 +170,11 @@ class _Pipeline(torch.autograd.Function):
 
             topo.pipeline_comm.Barrier()
 
-        # broadcast the outputs in the last pipeline stage to all stages
-        root = topo.get_pipeline_rank_of_last_stage()
+        # make outputs
         if stage_idx == num_stages - 1:
             out = torch.stack(outputs)
-            out_shape = list(out.shape)
         else:
-            out_shape = None
-        # make the output buffer
-        if final_output_buffer is None:
-            out_shape = topo.pipeline_comm.bcast(out_shape, root=root)
-            if stage_idx == num_stages - 1:
-                final_output_buffer = out
-            else:
-                final_output_buffer = torch.empty(out_shape)
-        final_output_buffer = prep_tensor_for_mpi_op(final_output_buffer)
-        topo.pipeline_comm.Bcast(buf=final_output_buffer, root=root)
+            out = None
 
         # save variables for backwards pass
         ctx.topo = topo
@@ -194,7 +182,7 @@ class _Pipeline(torch.autograd.Function):
         ctx.outputs = outputs
         ctx.buffer = buffer
 
-        return final_output_buffer
+        return out
 
     @staticmethod
     def backward(ctx, grads):
