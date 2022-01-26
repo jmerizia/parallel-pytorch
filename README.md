@@ -1,4 +1,4 @@
-<img src="./3d.png" width="500px"></img>
+<img src="./3d.png" width="400px"></img>
 
 image source:
 <a href="https://www.microsoft.com/en-us/research/blog/deepspeed-extreme-scale-model-training-for-everyone/">DeepSpeed</a>
@@ -14,6 +14,8 @@ A (WIP) collection of various PyTorch models implemented with full 3D-parallelis
     - [ ] pipeline scheduler
     - [ ] data parallel
     - [ ] checkpointing
+    - [ ] MoE
+    - [ ] weight initialization
 - [ ] models
     - [ ] minGPT
     - [ ] ViT
