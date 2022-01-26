@@ -169,10 +169,6 @@ class _Pipeline(torch.autograd.Function):
                 right_stage_idx=right_stage_idx
             )
 
-            print(global_rank(), it, len(inputs), len(outputs))
-            topo.pipeline_comm.Barrier()
-            if global_rank() == 0:
-                print('----')
             topo.pipeline_comm.Barrier()
 
         # broadcast the outputs in the last pipeline stage to all stages
