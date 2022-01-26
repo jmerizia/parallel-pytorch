@@ -14,6 +14,9 @@ todo list
 - [ ] tests for correctness across various scales
 - [ ] benchmark against existing solutions
 
+more niche things
+- [ ] enable sending arbitrary objects in pipeline scheduler
+
 future performance improvements
 - [ ] only send input to the first pipeline stage
 - [ ] gradient checkpointing for pipeline
