@@ -43,6 +43,17 @@ future performance improvements
 ```
 
 ```bibtex
+@misc{narayanan2021efficient,
+      title={Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM}, 
+      author={Deepak Narayanan and Mohammad Shoeybi and Jared Casper and Patrick LeGresley and Mostofa Patwary and Vijay Anand Korthikanti and Dmitri Vainbrand and Prethvi Kashinkunti and Julie Bernauer and Bryan Catanzaro and Amar Phanishayee and Matei Zaharia},
+      year={2021},
+      eprint={2104.04473},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL}
+}
+```
+
+```bibtex
 @misc{rajbhandari2020zero,
       title={ZeRO: Memory Optimizations Toward Training Trillion Parameter Models}, 
       author={Samyam Rajbhandari and Jeff Rasley and Olatunji Ruwase and Yuxiong He},
