@@ -5,7 +5,10 @@ image source:
 
 ## Parallel Pytorch
 
-A (WIP) implementation of DeepSpeed/Megatron-ML style 3D parallelism, along with some models and helpful utilities.
+A (WIP) lightweight implementation of DeepSpeed/Megatron-ML style 3D parallelism,
+along with some models and helpful utilities.
+It is based around the [DistDL](https://github.com/distdl/distdl) programming model,
+but aims to be feature complete for transformers.
 
 ## Todo
 
@@ -83,5 +86,16 @@ future performance improvements
       eprint={2104.07857},
       archivePrefix={arXiv},
       primaryClass={cs.DC}
+}
+```
+
+```bibtex
+@misc{hewett2020linear,
+      title={A Linear Algebraic Approach to Model Parallelism in Deep Learning}, 
+      author={Russell J. Hewett and Thomas J. Grady II au2},
+      year={2020},
+      eprint={2006.03108},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
 }
 ```
