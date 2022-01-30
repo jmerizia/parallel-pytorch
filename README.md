@@ -21,6 +21,7 @@ core
 - [X] weight initialization
 - [ ] tests for correctness across various scales
 - [ ] enable sending arbitrary objects in pipeline scheduler
+- [ ] CUDA support
 
 models
 - [X] minGPT
