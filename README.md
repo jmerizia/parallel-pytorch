@@ -12,24 +12,23 @@ but aims to be feature complete for transformers.
 
 ## Todo
 
-- core shared utils
-    - [X] model parallel primitives
-    - [X] pipeline scheduler
-    - [ ] data parallel
-    - [ ] checkpointing
-    - [ ] MoE
-    - [X] weight initialization
-- models
-    - [X] minGPT
-    - [ ] ViT
-    - [ ] GPT-J
+core
+- [X] model parallel primitives
+- [X] pipeline scheduler
+- [ ] data parallel
+- [ ] checkpointing
+- [ ] MoE
+- [X] weight initialization
 - [ ] tests for correctness across various scales
-- [ ] benchmark against existing solutions
-
-more niche things
 - [ ] enable sending arbitrary objects in pipeline scheduler
 
+models
+- [X] minGPT
+- [ ] ViT
+- [ ] GPT-J
+
 future performance improvements
+- [ ] benchmark against existing solutions
 - [ ] gradient checkpointing for pipeline
 - [ ] benchmarking with NVTX
 - [ ] ZeRO optimizations
