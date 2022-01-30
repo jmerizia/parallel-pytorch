@@ -6,13 +6,11 @@ setup(
   include_package_data = True,
   version = '0.0.2',
   license='MIT',
-  description = 'Parallel Pytorch',
+  description = 'utilities for working with MPI+PyTorch',
   author = 'Jacob Merizian',
-  author_email = 'jmerizia@gmail.com',
   url = 'https://github.com/jmerizia/parallel-pytorch',
   install_requires=[
     'mpi4py',
-    'ftfy',
     'torch>=1.6',
   ],
   classifiers=[
@@ -20,6 +18,6 @@ setup(
     'Intended Audience :: Developers',
     'Topic :: Scientific/Engineering :: Artificial Intelligence',
     'License :: OSI Approved :: MIT License',
-    'Programming Language :: Python :: 3.6',
+    'Programming Language :: Python :: 3.8',
   ],
 )
