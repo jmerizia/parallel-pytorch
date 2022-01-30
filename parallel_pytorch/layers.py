@@ -18,6 +18,7 @@ class DistributedEmbedding(nn.Module):
         block_size: int,
         vocab_size: int,
         n_embd: int,
+        device=None,
     ):
         super().__init__()
         self.topo = topo
@@ -29,9 +30,9 @@ class DistributedEmbedding(nn.Module):
         parts = split_number(vocab_size, size)
         self.local_vocab_size = parts[rank]
         self.offset = ([0] + cumsum(parts))[rank]
-        self.tok_emb = nn.Embedding(self.local_vocab_size + 1, n_embd, 0)
+        self.tok_emb = nn.Embedding(self.local_vocab_size + 1, n_embd, 0, device=device)
         self.sr = SumReduce(topo.model_comm)
-        self.pos_emb = nn.Parameter(torch.zeros(1, block_size, n_embd))
+        self.pos_emb = nn.Parameter(torch.zeros(1, block_size, n_embd, device=device))
 
     def forward(self, idx):
         b, t = idx.size()

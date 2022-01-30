@@ -1,3 +1,4 @@
+# Adapted from https://github.com/karpathy/minGPT/blob/master/mingpt/model.py
 """
 GPT model:
 - the initial stem consists of a combination of token encoding and a positional encoding
@@ -30,6 +31,7 @@ class MLP(nn.Module):
         *,
         topo: Topology,
         n_embd: int,
+        device=None,
     ):
         super().__init__()
         self.topo = topo
@@ -38,9 +40,9 @@ class MLP(nn.Module):
         assert (4 * D) % size == 0
         self.mlp = nn.Sequential(
             Broadcast(topo.model_comm),
-            nn.Linear(D, 4 * D // size),
+            nn.Linear(D, 4 * D // size, device=device),
             nn.ReLU(),
-            nn.Linear(4 * D // size, D),
+            nn.Linear(4 * D // size, D, device=device),
             SumReduce(topo.model_comm),
         )
 
@@ -63,6 +65,7 @@ class CausalSelfAttention(nn.Module):
         n_head: int,
         attn_pdrop: float,
         resid_pdrop: float,
+        device=None,
     ):
         super().__init__()
         self.topo = topo
@@ -72,17 +75,17 @@ class CausalSelfAttention(nn.Module):
         assert (n_embd // size) % (n_head // size) == 0
         # key, query, value projections for all heads
         self.bc = Broadcast(topo.model_comm)
-        self.key = nn.Linear(n_embd, n_embd // size)
-        self.query = nn.Linear(n_embd, n_embd // size)
-        self.value = nn.Linear(n_embd, n_embd // size)
+        self.key = nn.Linear(n_embd, n_embd // size, device=device)
+        self.query = nn.Linear(n_embd, n_embd // size, device=device)
+        self.value = nn.Linear(n_embd, n_embd // size, device=device)
         # regularization
         self.attn_drop = nn.Dropout(attn_pdrop)
         self.resid_drop = nn.Dropout(resid_pdrop)
         # output projection
-        self.proj = nn.Linear(n_embd // size, n_embd)
+        self.proj = nn.Linear(n_embd // size, n_embd, device=device)
         self.sr = SumReduce(topo.model_comm)
         # causal mask to ensure that attention is only applied to the left in the input sequence
-        self.register_buffer("mask", torch.tril(torch.ones(block_size, block_size))
+        self.register_buffer("mask", torch.tril(torch.ones(block_size, block_size, device=device))
                                      .view(1, 1, block_size, block_size))
         self.local_n_head = n_head // size
 
@@ -125,10 +128,11 @@ class Block(nn.Module):
         n_head: int,
         attn_pdrop: int,
         resid_pdrop: int,
+        device=None,
     ):
         super().__init__()
-        self.ln1 = nn.LayerNorm(n_embd)
-        self.ln2 = nn.LayerNorm(n_embd)
+        self.ln1 = nn.LayerNorm(n_embd, device=device)
+        self.ln2 = nn.LayerNorm(n_embd, device=device)
         self.attn = CausalSelfAttention(
             topo=topo,
             block_size=block_size,
@@ -137,146 +141,142 @@ class Block(nn.Module):
             attn_pdrop=attn_pdrop,
             resid_pdrop=resid_pdrop,
         )
-        self.mlp = MLP(topo=topo, n_embd=n_embd)
+        self.mlp = MLP(topo=topo, n_embd=n_embd, device=device)
 
     def forward(self, x):
         x = x + self.attn(self.ln1(x))
         x = x + self.mlp(self.ln2(x))
         return x
 
-class GPT(nn.Module):
+
+def make_pipelined_GPT(
+    *,
+    topo: Topology,
+    block_size: int,
+    vocab_size: int,
+    n_embd: int,
+    n_layer: int,
+    n_head: int,
+    embd_pdrop: float,
+    attn_pdrop: float,
+    resid_pdrop: float,
+    device=None,
+):
     """ the full GPT language model, with a context size of block_size """
 
-    def __init__(
-        self,
-        *,
-        topo: Topology,
-        block_size: int,
-        vocab_size: int,
-        n_embd: int,
-        n_layer: int,
-        n_head: int,
-        embd_pdrop: float,
-        attn_pdrop: float,
-        resid_pdrop: float,
-    ):
-        super().__init__()
-        self.topo = topo
-        self.block_size = block_size
+    emb = DistributedEmbedding(
+        topo=topo,
+        block_size=block_size,
+        vocab_size=vocab_size,
+        n_embd=n_embd,
+        device=device,
+    )
+    drop = nn.Dropout(embd_pdrop)
 
-        # input embedding stem (note how we don't reference in the module yet)
-        emb = DistributedEmbedding(
+    # transformer blocks
+    blocks = [
+        Block(
             topo=topo,
-            block_size=block_size,
-            vocab_size=vocab_size,
             n_embd=n_embd,
+            block_size=block_size,
+            n_head=n_head,
+            attn_pdrop=attn_pdrop,
+            resid_pdrop=resid_pdrop,
+            device=device,
         )
-        drop = nn.Dropout(embd_pdrop)
+        for _ in range(n_layer)
+    ]
 
-        # transformer blocks
-        blocks = [
-            Block(
-                topo=topo,
-                n_embd=n_embd,
-                block_size=block_size,
-                n_head=n_head,
-                attn_pdrop=attn_pdrop,
-                resid_pdrop=resid_pdrop,
-            )
-            for _ in range(n_layer)
-        ]
+    # decoder head
+    ln_f = nn.LayerNorm(n_embd, device=device)
+    head = nn.Linear(n_embd, vocab_size, bias=False, device=device)
 
-        # decoder head
-        ln_f = nn.LayerNorm(n_embd)
-        head = nn.Linear(n_embd, vocab_size, bias=False)
+    # break model into pipeline stages
+    layers = [
+        emb,
+        drop,
+        *blocks,
+        ln_f,
+        head
+    ]
+    stages = split_list(layers, topo.get_num_pipeline_stages())
+    stages = [nn.Sequential(*stage) for stage in stages]
+    pipeline = Pipeline(topo=topo, stages=stages)
 
-        # break model into pipeline stages
-        self.pipeline = Pipeline(
-            topo=topo,
-            layers=[
-                emb,
-                drop,
-                *blocks,
-                ln_f,
-                head
-            ]
-        )
-
-        self.apply(self._init_weights)
-
-        local_param_count = sum(p.numel() for p in self.parameters())
-        param_count = topo.model_comm.allreduce(local_param_count)
-        if topo.model_comm.Get_rank() == 0:
-            logger.info("number of parameters: %e", param_count)
-
-    def _init_weights(self, module):
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            module.weight.data.normal_(mean=0.0, std=0.02)
-            if isinstance(module, nn.Linear) and module.bias is not None:
+    def _init_weights(module):
+        with torch.no_grad():
+            if isinstance(module, (nn.Linear, nn.Embedding)):
+                module.weight.data.normal_(mean=0.0, std=0.02)
+                if isinstance(module, nn.Linear) and module.bias is not None:
+                    module.bias.data.zero_()
+            elif isinstance(module, nn.LayerNorm):
                 module.bias.data.zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
+                module.weight.data.fill_(1.0)
 
-    def configure_optimizers(self, train_config):
-        """
-        This long function is unfortunately doing something very simple and is being very defensive:
-        We are separating out all parameters of the model into two buckets: those that will experience
-        weight decay for regularization and those that won't (biases, and layernorm/embedding weights).
-        We are then returning the PyTorch optimizer object.
-        """
+    pipeline.stage.apply(_init_weights)
 
-        # separate out all parameters to those that will and won't experience regularizing weight decay
-        decay = set()
-        no_decay = set()
-        whitelist_weight_modules = (torch.nn.Linear, )
-        blacklist_weight_modules = (torch.nn.LayerNorm, torch.nn.Embedding)
-        for mn, m in self.named_modules():
-            for pn, p in m.named_parameters():
-                fpn = '%s.%s' % (mn, pn) if mn else pn # full param name
+    local_param_count = sum(p.numel() for p in pipeline.stage.parameters())
+    stage_param_count = topo.model_comm.reduce(local_param_count, root=0)
+    if topo.model_comm.Get_rank() == 0:
+        logger.info("number of parameters in stage %d: %e", topo.get_pipeline_stage_idx(), stage_param_count)
+    param_count = topo.pipeline_comm.reduce(stage_param_count if topo.model_comm.Get_rank() == 0 else 0, root=0)
+    if topo.pipeline_comm.Get_rank() == 0:
+        logger.info("number of total parameters: %e", param_count)
 
-                if pn.endswith('bias'):
-                    # all biases will not be decayed
-                    no_decay.add(fpn)
-                elif pn.endswith('weight') and isinstance(m, whitelist_weight_modules):
-                    # weights of whitelist modules will be weight decayed
-                    decay.add(fpn)
-                elif pn.endswith('weight') and isinstance(m, blacklist_weight_modules):
-                    # weights of blacklist modules will NOT be weight decayed
-                    no_decay.add(fpn)
+    return pipeline
 
-        # special case the position embedding parameter in the root GPT module as not decayed
-        if self.topo.get_pipeline_stage_idx() == 0:
-            no_decay.add('pipeline.stage.0.pos_emb')
 
-        # validate that we considered every parameter
-        param_dict = {pn: p for pn, p in self.named_parameters()}
-        inter_params = decay & no_decay
-        union_params = decay | no_decay
-        assert len(inter_params) == 0, "parameters %s made it into both decay/no_decay sets!" % (str(inter_params), )
-        assert len(param_dict.keys() - union_params) == 0, "parameters %s were not separated into either decay/no_decay set!" \
-                                                    % (str(param_dict.keys() - union_params), )
+def configure_optimizers(pipeline: Pipeline, learning_rate, weight_decay, betas):
+    """
+    This long function is unfortunately doing something very simple and is being very defensive:
+    We are separating out all parameters of the model into two buckets: those that will experience
+    weight decay for regularization and those that won't (biases, and layernorm/embedding weights).
+    We are then returning the PyTorch optimizer object.
+    """
 
-        # create the pytorch optimizer object
-        optim_groups = [
-            {"params": [param_dict[pn] for pn in sorted(list(decay))], "weight_decay": train_config.weight_decay},
-            {"params": [param_dict[pn] for pn in sorted(list(no_decay))], "weight_decay": 0.0},
-        ]
-        optimizer = torch.optim.AdamW(optim_groups, lr=train_config.learning_rate, betas=train_config.betas)
-        return optimizer
+    # separate out all parameters to those that will and won't experience regularizing weight decay
+    decay = set()
+    no_decay = set()
+    whitelist_weight_modules = (torch.nn.Linear, )
+    blacklist_weight_modules = (torch.nn.LayerNorm, torch.nn.Embedding)
+    for mn, m in pipeline.stage.named_modules():
+        for pn, p in m.named_parameters():
+            fpn = '%s.%s' % (mn, pn) if mn else pn # full param name
 
-    def forward(self, idx, targets=None):
-        b, t = idx.size()
-        assert t <= self.block_size, "Cannot forward, model block size is exhausted."
+            if pn.endswith('bias'):
+                # all biases will not be decayed
+                no_decay.add(fpn)
+            elif pn.endswith('weight') and isinstance(m, whitelist_weight_modules):
+                # weights of whitelist modules will be weight decayed
+                decay.add(fpn)
+            elif pn.endswith('weight') and isinstance(m, blacklist_weight_modules):
+                # weights of blacklist modules will NOT be weight decayed
+                no_decay.add(fpn)
 
-        # forward the GPT model
-        logits = self.pipeline(idx)
+    # special case the position embedding parameter in the root GPT module as not decayed
+    if pipeline.topo.get_pipeline_stage_idx() == 0:
+        no_decay.add('0.pos_emb')
 
-        loss = None
-        if targets is not None:
-            if self.topo.is_last_pipeline_stage():
-                loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-            else:
-                loss = torch.zeros(1, requires_grad=True)
+    # validate that we considered every parameter
+    param_dict = {pn: p for pn, p in pipeline.stage.named_parameters()}
+    inter_params = decay & no_decay
+    union_params = decay | no_decay
+    assert len(inter_params) == 0, "parameters %s made it into both decay/no_decay sets!" % (str(inter_params), )
+    assert len(param_dict.keys() - union_params) == 0, "parameters %s were not separated into either decay/no_decay set!" \
+                                                % (str(param_dict.keys() - union_params), )
 
-        return logits, loss
+    # create the pytorch optimizer object
+    optim_groups = [
+        {"params": [param_dict[pn] for pn in sorted(list(decay))], "weight_decay": weight_decay},
+        {"params": [param_dict[pn] for pn in sorted(list(no_decay))], "weight_decay": 0.0},
+    ]
+    optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas)
+    return optimizer
+
+
+def criterion(topo, logits, targets):
+    if topo.is_last_pipeline_stage():
+        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+    else:
+        return logits
+    return loss

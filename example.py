@@ -1,15 +1,22 @@
 import torch
 import torch.nn as nn
+from torch.nn.utils import skip_init
+import logging
 
-from parallel_pytorch.models.minGPT import GPT
+from parallel_pytorch.models.minGPT import configure_optimizers, criterion, make_pipelined_GPT
 from parallel_pytorch.ops import Broadcast
 from parallel_pytorch.topology import Topology
 from parallel_pytorch.utils import global_rank, set_seed
 
-print('hi')
-quit()
+logger = logging.getLogger(__name__)
 
-topo = Topology(dp=1, pp=4, mp=1)
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+    datefmt="%m/%d/%Y %H:%M:%S",
+    level=logging.DEBUG,
+)
+
+topo = Topology(dp=1, pp=2, mp=2)
 set_seed(topo.data_comm.Get_rank())
 
 # configs
@@ -23,19 +30,13 @@ embd_pdrop = 0.1
 attn_pdrop = 0.1
 resid_pdrop = 0.1
 
-class TrainConfig:
-    batch_size = 64
-    learning_rate = 0.1
-    weight_decay = 0.1
-    betas = (0.9, 0.95)
+# training configs
+batch_size = 64
+learning_rate = 0.1
+weight_decay = 0.1
+betas = (0.9, 0.95)
 
-    def __init__(self, **kwargs):
-        for k,v in kwargs.items():
-            setattr(self, k, v)
-
-train_config = TrainConfig()
-
-model = GPT(
+pipeline = make_pipelined_GPT(
     topo=topo,
     block_size=block_size,
     vocab_size=vocab_size,
@@ -50,27 +51,33 @@ data = [
     (
         torch.randint(0, vocab_size, [batch_size, block_size], dtype=torch.long),
         torch.randint(0, vocab_size, [batch_size, block_size], dtype=torch.long),
-    ) for _ in range(300)
+    ) for _ in range(10)
 ]
 
-criterion = nn.MSELoss()
-parameters = model.parameters()
-optimizer = torch.optim.AdamW(parameters, lr=train_config.learning_rate, betas=train_config.betas)
+optimizer = configure_optimizers(
+    pipeline=pipeline,
+    learning_rate=learning_rate,
+    weight_decay=weight_decay,
+    betas=betas,
+)
 
 running_loss = 0
 for it, (x, y) in enumerate(data):
-    optimizer.zero_grad()
-    logits, loss = model(x, y)
-    print(logits.requires_grad, loss.requires_grad)
-    quit()
-    if topo.is_last_pipeline_stage():
-        print(global_rank(), logits.size())
-    quit()
-    print(global_rank(), loss.requires_grad)
-    loss.backward()
-    quit()
-    optimizer.step()
-    running_loss += loss.item()
-    if it % 10 == 9 and global_rank() == 0:
-        print(f'iter {it} loss: {running_loss:.3f}')
-        running_loss = 0.0
+    with torch.set_grad_enabled(True):
+
+        optimizer.zero_grad()
+
+        # notice the forward semantics here are slightly different for pipelines
+        logits = pipeline.forward(x)
+        loss = criterion(topo, logits, y)
+        loss.backward()
+
+        # since Pipeline is just a normal class, we must call backwards manually
+        pipeline.backward(logits.grad)
+        optimizer.step()
+
+        # we will only have the loss if we're the last pipeline stage
+        if topo.is_last_pipeline_stage() and topo.model_comm.Get_rank() == 0:
+            running_loss += loss.item()
+            logger.info(f'batch {it} loss: {running_loss:.3f}')
+            running_loss = 0.0

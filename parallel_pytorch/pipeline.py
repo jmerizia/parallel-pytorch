@@ -10,32 +10,29 @@ from parallel_pytorch.topology import Topology
 from parallel_pytorch.utils import global_rank, prep_tensor_for_mpi_op, split_list
 
 
-class Pipeline(nn.Module):
+class Pipeline:
     """
-    A pipeline module which implements the standard GPipe pipeline schedule.
+    An implementation of the standard GPipe pipeline schedule.
     """
 
     def __init__(
         self,
         *,
         topo: Topology,
-        layers: List[nn.Module],
+        stages: List[nn.Module],
     ):
+        super().__init__()
         self.topo = topo
-        self.inputs = []
-        self.outputs = []
-        self.buffer = None
-        stages = split_list(layers, topo.get_num_pipeline_stages())
-        stages = [nn.Sequential(*stage) for stage in stages]
         assert len(stages) == topo.get_num_pipeline_stages()
         self.stage = stages[topo.get_pipeline_stage_idx()]
-
-    def __call__(self, batches):
-        return self.forward(batches)
+        for idx, stage in enumerate(stages):
+            if idx != topo.get_pipeline_stage_idx():
+                del stage
 
     def forward(self, batches: torch.Tensor):
         self.inputs = []
         self.outputs = []
+        recv_buffer = None
         num_stages = self.topo.get_num_pipeline_stages()
         stage_idx = self.topo.get_pipeline_stage_idx()
         if self.topo.is_first_pipeline_stage():
@@ -49,10 +46,10 @@ class Pipeline(nn.Module):
             if stage_idx <= it < stage_idx + num_stages:
                 # input to this stage comes from the previous stage (i.e., the buffer) or the input
                 if stage_idx == 0:
-                    input = micro_batches[it].clone()
+                    input = micro_batches[it].clone().detach()
                 else:
-                    assert self.buffer is not None
-                    input = self.buffer.clone()
+                    assert recv_buffer is not None
+                    input = recv_buffer.clone().detach().requires_grad_(True)
             else:
                 input = None
             if input is not None:
@@ -76,11 +73,11 @@ class Pipeline(nn.Module):
                 left_stage_idx=left_stage_idx,
                 right_stage_idx=right_stage_idx,
             )
-            if self.buffer is None and recv_buffer_shape is not None:
-                self.buffer = torch.empty(recv_buffer_shape)
-            self.buffer = self._pass_forward(
+            if recv_buffer is None and recv_buffer_shape is not None:
+                recv_buffer = torch.empty(recv_buffer_shape)
+            recv_buffer = self._pass_forward(
                 sendbuf=output,
-                recvbuf=self.buffer,
+                recvbuf=recv_buffer,
                 left_stage_idx=left_stage_idx,
                 right_stage_idx=right_stage_idx
             )
@@ -90,13 +87,14 @@ class Pipeline(nn.Module):
             out = torch.cat(self.outputs, 0).requires_grad_(True)
         else:
             out = torch.zeros(1, requires_grad=True)
-        out.register_hook(self._backward)
+        out = out.detach().requires_grad_(True)
         return out
 
-    def _backward(self, batches: torch.Tensor):
+    def backward(self, batches: torch.Tensor):
         num_stages = self.topo.get_num_pipeline_stages()
         stage_idx = self.topo.get_pipeline_stage_idx()
-        grad_outputs = []
+        results = []
+        recv_buffer = None
         if self.topo.is_last_pipeline_stage():
             shape = list(batches.size())
             batch_size = shape[0]
@@ -106,41 +104,45 @@ class Pipeline(nn.Module):
             if num_stages - stage_idx - 1 <= it < 2 * num_stages - stage_idx - 1:
                 # this grad should come from either the input to backward or the buffer
                 if stage_idx == num_stages - 1:
-                    grad = micro_batches[it].clone()
+                    grad_output = micro_batches[it].clone()
                 else:
-                    grad = self.buffer.clone()
-            else:
-                grad = None
-            if grad:
-                input = self.inputs.pop(-1)
-                output = self.outputs.pop(-1)
-                output.backward(grad)
-                grad_output = input.grad
-                grad_outputs.append(grad_output)
-                grad_output_shape = grad_output.shape
+                    grad_output = recv_buffer.clone()
             else:
                 grad_output = None
-                grad_output_shape = None
+            if grad_output is not None:
+                input = self.inputs.pop(-1)
+                output = self.outputs.pop(-1)
+                output.backward(grad_output)
+                result = input.grad
+                if result is None:
+                    # replace with a dummy value here until I implement arbitrary inputs/outputs for pipeline stages
+                    result = torch.zeros(1)
+                results.append(result)
+                result_shape = result.shape
+            else:
+                result = None
+                result_shape = None
             # compute the range of stages that need to participate in the communication
             left_stage_idx = max(num_stages - it - 2, 0)
             right_stage_idx = min(num_stages, 2 * num_stages - it - 1)
             # make necessary output buffers
             recv_buffer_shape = self._pass_backward_pickle(
-                obj=grad_output_shape,
+                obj=result_shape,
                 left_stage_idx=left_stage_idx,
                 right_stage_idx=right_stage_idx,
             )
-            if buffer is None and recv_buffer_shape is not None:
-                buffer = torch.empty(recv_buffer_shape)
-            buffer = self._pass_backward(
-                sendbuf=grad_output,
-                recvbuf=buffer,
+            if recv_buffer is None and recv_buffer_shape is not None:
+                recv_buffer = torch.empty(recv_buffer_shape)
+            recv_buffer = self._pass_backward(
+                sendbuf=result,
+                recvbuf=recv_buffer,
                 left_stage_idx=left_stage_idx,
                 right_stage_idx=right_stage_idx,
             )
+            self.topo.pipeline_comm.Barrier()
         # make outputs
         if self.topo.is_first_pipeline_stage():
-            out = torch.cat(grad_outputs, 0)
+            out = torch.cat(results, 0)
         else:
             out = torch.zeros(1)
         return out, None, None
@@ -192,12 +194,12 @@ class Pipeline(nn.Module):
         elif stage_idx == left_stage_idx:
             next_rank = self.topo.get_pipeline_rank_of_next_stage()
             recvbuf = prep_tensor_for_mpi_op(recvbuf)
-            self.topo.pipeline_comm.Recv(buf=recvbuf, dest=next_rank)
+            self.topo.pipeline_comm.Recv(buf=recvbuf, source=next_rank)
             ret = recvbuf
         elif stage_idx == right_stage_idx - 1:
-            prev_rank = self.topo.get_pipeline_rank_of_next_stage()
+            prev_rank = self.topo.get_pipeline_rank_of_prev_stage()
             sendbuf = prep_tensor_for_mpi_op(sendbuf)
-            self.topo.pipeline_comm.Send(buf=sendbuf, source=prev_rank)
+            self.topo.pipeline_comm.Send(buf=sendbuf, dest=prev_rank)
             ret = recvbuf
         else:
             ret = None
@@ -234,10 +236,10 @@ class Pipeline(nn.Module):
         num_stages = self.topo.get_num_pipeline_stages()
         assert 0 <= left_stage_idx < num_stages
         assert 0 <= right_stage_idx <= num_stages
-        if left_stage_idx < stage_idx < num_stages - 1:
+        if left_stage_idx < stage_idx < right_stage_idx - 1:
             next_rank = self.topo.get_pipeline_rank_of_next_stage()
             prev_rank = self.topo.get_pipeline_rank_of_prev_stage()
-            right_neighbor_obj = self.topo.pipeline_comm.sendrecv(obj=obj, dest=prev_rank, source=next_rank)
+            right_neighbor_obj = self.topo.pipeline_comm.sendrecv(sendobj=obj, dest=prev_rank, source=next_rank)
         elif stage_idx == left_stage_idx:
             next_rank = self.topo.get_pipeline_rank_of_next_stage()
             right_neighbor_obj = self.topo.pipeline_comm.recv(source=next_rank)
