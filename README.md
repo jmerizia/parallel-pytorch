@@ -12,15 +12,15 @@ but aims to be feature complete for transformers.
 
 ## Todo
 
-- [ ] core shared utils
+- core shared utils
     - [X] model parallel primitives
     - [X] pipeline scheduler
     - [ ] data parallel
     - [ ] checkpointing
     - [ ] MoE
-    - [ ] weight initialization
-- [ ] models
-    - [ ] minGPT
+    - [X] weight initialization
+- models
+    - [X] minGPT
     - [ ] ViT
     - [ ] GPT-J
 - [ ] tests for correctness across various scales
