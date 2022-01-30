@@ -1,3 +1,6 @@
+# Run this program with `mpirun`. For example:
+#   mpirun -np 4 python ./examples/train_minGPT.py --pp=2 --mp=2
+
 import torch
 import fire
 import logging

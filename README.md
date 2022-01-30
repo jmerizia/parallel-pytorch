@@ -22,6 +22,7 @@ core
 - [ ] tests for correctness across various scales
 - [ ] enable sending arbitrary objects in pipeline scheduler
 - [ ] CUDA support
+- [ ] Dockerfile
 
 models
 - [X] minGPT
