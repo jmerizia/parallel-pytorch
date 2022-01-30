@@ -1,13 +1,11 @@
 import torch
-import torch.nn as nn
-from torch.nn.utils import skip_init
 import fire
 import logging
+import itertools
 
 from parallel_pytorch.models.minGPT import configure_optimizers, criterion, make_pipelined_GPT
-from parallel_pytorch.ops import Broadcast
 from parallel_pytorch.topology import Topology
-from parallel_pytorch.utils import global_rank, set_seed
+from parallel_pytorch.utils import set_seed
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +32,21 @@ def main(
     learning_rate=0.1,
     weight_decay=0.1,
     betas=(0.9, 0.95),
+    seed=42,
 ):
     """ Train a simple minGPT model with 3D parallelism. """
 
+    # We first have to create a "topology" which is a slim class which holds information
+    # about the overall shape of the network.
     topo = Topology(dp=dp, pp=pp, mp=mp)
-    set_seed(topo.data_comm.Get_rank())
 
+    # We set the seed in torch/numpy/random to the current rank to ensure that weight initialization
+    # happens differently on all ranks.
+    set_seed(seed * topo.data_comm.Get_rank())
+
+    # Here, we load in our pipelined minGPT. The one caveat to be aware of is that
+    # this is not a torch..nn.Module, but rather a "Pipeline" class.
+    # It still has forward/backward functions, so we can use it *almost* normally.
     pipeline = make_pipelined_GPT(
         topo=topo,
         block_size=block_size,
@@ -51,6 +58,9 @@ def main(
         attn_pdrop=attn_pdrop,
         resid_pdrop=resid_pdrop,
     )
+
+    # Generate some fake data. Technically we only need it on the first and last stages of the pipeline,
+    # but text data isn't so expensive to load in on all ranks.
     data = [
         (
             torch.randint(0, vocab_size, [batch_size, block_size], dtype=torch.long),
@@ -58,6 +68,7 @@ def main(
         ) for _ in range(10)
     ]
 
+    # This function also doesn't really change from the original implementation.
     optimizer = configure_optimizers(
         pipeline=pipeline,
         learning_rate=learning_rate,
@@ -67,24 +78,34 @@ def main(
 
     running_loss = 0
     for it, (x, y) in enumerate(data):
-        with torch.set_grad_enabled(True):
 
-            optimizer.zero_grad()
+        optimizer.zero_grad()
 
-            # notice the forward semantics here are slightly different for pipelines
-            logits = pipeline.forward(x)
-            loss = criterion(topo, logits, y)
-            loss.backward()
+        # As usual, forward the model and compute loss.
+        # Under the hood, this is passing our input through the entire pipeline.
+        logits = pipeline(x)
+        loss = criterion(topo, logits, y)
 
-            # since Pipeline is just a normal class, we must call backwards manually
-            pipeline.backward(logits.grad)
-            optimizer.step()
+        # Now we do the backwards pass. As mentioned before, since the pipeline is not technically a module,
+        # when we do backward on the loss, that populates logits.grad normally,
+        # but it doesn't actually propagate the loss down the rest of the pipeline for us.
+        # This means we must call `backward()` manually.
+        loss.backward()
+        pipeline.backward(logits.grad)
 
-            # we will only have the loss if we're the last pipeline stage
-            if topo.is_last_pipeline_stage() and topo.model_comm.Get_rank() == 0:
-                running_loss += loss.item()
-                logger.info(f'batch {it} loss: {running_loss:.3f}')
-                running_loss = 0.0
+        # Fortunately, PyTorch aggregates the gradients for us if we call `forward()` multiple times
+        # (which we do in the pipeline with "micro batches").
+        # Thus, we can just step the optimizer as we normally do.
+        optimizer.step()
+
+        # This step deserves some explanation. Since we are pipelining the input, we can only use logits/loss
+        # if we're at the last stage of the pipeline.
+        # Additionally, since there might be multiple model-parallel processes, we must make sure
+        # to print on just the root one.
+        if topo.is_last_pipeline_stage() and topo.model_comm.Get_rank() == 0:
+            running_loss += loss.item()
+            logger.info(f'batch {it} loss: {running_loss:.3f}')
+            running_loss = 0.0
 
 
 if __name__ == '__main__':

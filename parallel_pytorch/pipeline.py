@@ -29,6 +29,9 @@ class Pipeline:
             if idx != topo.get_pipeline_stage_idx():
                 del stage
 
+    def __call__(self, batches: torch.Tensor):
+        return self.forward(batches)
+
     def forward(self, batches: torch.Tensor):
         self.inputs = []
         self.outputs = []

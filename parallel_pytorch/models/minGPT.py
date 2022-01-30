@@ -164,6 +164,10 @@ def make_pipelined_GPT(
 ):
     """ the full GPT language model, with a context size of block_size """
 
+    # This function basically replaces the original GPT module.
+    # Since it's tricky to integrate the pipeline with PyTorch modules,
+    # it's actually easier to reason about the construction of the model this way.
+
     emb = DistributedEmbedding(
         topo=topo,
         block_size=block_size,
@@ -255,7 +259,7 @@ def configure_optimizers(pipeline: Pipeline, learning_rate, weight_decay, betas)
 
     # special case the position embedding parameter in the root GPT module as not decayed
     if pipeline.topo.get_pipeline_stage_idx() == 0:
-        no_decay.add('0.pos_emb')
+        no_decay.add('0.pos_emb')  # note we need the 0 since pipeline.stage is a torch.nn.Sequential
 
     # validate that we considered every parameter
     param_dict = {pn: p for pn, p in pipeline.stage.named_parameters()}
