@@ -1,3 +1,4 @@
 torch
 numpy
 mpi4py
+fire

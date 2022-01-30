@@ -12,6 +12,7 @@ setup(
   install_requires=[
     'mpi4py',
     'torch>=1.6',
+    'fire',
   ],
   classifiers=[
     'Development Status :: 4 - Beta',
