@@ -9,7 +9,14 @@ class Topology:
     A tiny class that stores all the MPI communicators and rank relationships.
     """
 
-    def __init__(self, dp: int, pp: int, mp: int, device: Literal['cpu', 'cuda'] = 'cpu'):
+    def __init__(
+        self,
+        *,
+        dp: int,
+        pp: int,
+        mp: int,
+        device: Literal['cpu', 'cuda'] = 'cpu',
+    ):
         self.dp = dp
         self.pp = pp
         self.mp = mp
