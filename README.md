@@ -14,7 +14,7 @@ but aims to be feature complete for transformers.
 
 - [ ] core shared utils
     - [X] model parallel primitives
-    - [ ] pipeline scheduler
+    - [X] pipeline scheduler
     - [ ] data parallel
     - [ ] checkpointing
     - [ ] MoE
