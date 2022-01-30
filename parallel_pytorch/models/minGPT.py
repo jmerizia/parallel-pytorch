@@ -162,6 +162,7 @@ class GPT(nn.Module):
     ):
         super().__init__()
         self.topo = topo
+        self.block_size = block_size
 
         # input embedding stem (note how we don't reference in the module yet)
         emb = DistributedEmbedding(
@@ -172,7 +173,7 @@ class GPT(nn.Module):
         )
         drop = nn.Dropout(embd_pdrop)
 
-        # pipelined transformer
+        # transformer blocks
         blocks = [
             Block(
                 topo=topo,
@@ -201,16 +202,12 @@ class GPT(nn.Module):
             ]
         )
 
-        self.block_size = block_size
         self.apply(self._init_weights)
 
         local_param_count = sum(p.numel() for p in self.parameters())
         param_count = topo.model_comm.allreduce(local_param_count)
         if topo.model_comm.Get_rank() == 0:
             logger.info("number of parameters: %e", param_count)
-
-    def get_block_size(self):
-        return self.block_size
 
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
@@ -275,10 +272,11 @@ class GPT(nn.Module):
         # forward the GPT model
         logits = self.pipeline(idx)
 
-        # if we are given some desired targets also calculate the loss
         loss = None
         if targets is not None:
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+            if self.topo.is_last_pipeline_stage():
+                loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+            else:
+                loss = torch.zeros(1, requires_grad=True)
 
         return logits, loss
-

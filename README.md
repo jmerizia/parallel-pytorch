@@ -32,6 +32,8 @@ more niche things
 future performance improvements
 - [ ] gradient checkpointing for pipeline
 - [ ] benchmarking with NVTX
+- [ ] ZeRO optimizations
+- [ ] comtiguous allocator for temporary buffers
 
 ## Citations
 

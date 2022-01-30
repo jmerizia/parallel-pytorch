@@ -44,3 +44,9 @@ class Topology:
 
     def get_pipeline_rank_of_first_stage(self):
         return 0
+
+    def is_first_pipeline_stage(self):
+        return self.get_pipeline_stage_idx() == 0
+
+    def is_last_pipeline_stage(self):
+        return self.get_pipeline_stage_idx() == self.get_num_pipeline_stages() - 1

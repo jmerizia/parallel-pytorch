@@ -2,9 +2,12 @@ import torch
 import torch.nn as nn
 
 from parallel_pytorch.models.minGPT import GPT
+from parallel_pytorch.ops import Broadcast
 from parallel_pytorch.topology import Topology
 from parallel_pytorch.utils import global_rank, set_seed
 
+print('hi')
+quit()
 
 topo = Topology(dp=1, pp=4, mp=1)
 set_seed(topo.data_comm.Get_rank())
@@ -51,15 +54,21 @@ data = [
 ]
 
 criterion = nn.MSELoss()
-optimizer = model.configure_optimizers(train_config)
+parameters = model.parameters()
+optimizer = torch.optim.AdamW(parameters, lr=train_config.learning_rate, betas=train_config.betas)
 
 running_loss = 0
 for it, (x, y) in enumerate(data):
     optimizer.zero_grad()
     logits, loss = model(x, y)
-    print(logits.size())
+    print(logits.requires_grad, loss.requires_grad)
     quit()
+    if topo.is_last_pipeline_stage():
+        print(global_rank(), logits.size())
+    quit()
+    print(global_rank(), loss.requires_grad)
     loss.backward()
+    quit()
     optimizer.step()
     running_loss += loss.item()
     if it % 10 == 9 and global_rank() == 0:
