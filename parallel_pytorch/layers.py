@@ -3,7 +3,7 @@ import torch.nn as nn
 from parallel_pytorch.topology import Topology
 
 from parallel_pytorch.utils import cumsum, split_number
-from parallel_pytorch.ops import SumReduce
+from parallel_pytorch.ops import AllReduce
 
 
 class DistributedEmbedding(nn.Module):
@@ -31,7 +31,7 @@ class DistributedEmbedding(nn.Module):
         self.local_vocab_size = parts[rank]
         self.offset = ([0] + cumsum(parts))[rank]
         self.tok_emb = nn.Embedding(self.local_vocab_size + 1, n_embd, 0, device=device)
-        self.sr = SumReduce(topo.model_comm)
+        self.sr = AllReduce(topo.model_comm)
         self.pos_emb = nn.Parameter(torch.zeros(1, block_size, n_embd, device=device))
 
     def forward(self, idx):

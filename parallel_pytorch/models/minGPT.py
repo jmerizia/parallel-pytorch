@@ -17,7 +17,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 from parallel_pytorch.layers import DistributedEmbedding
-from parallel_pytorch.ops import Broadcast, SumReduce
+from parallel_pytorch.ops import AllReduceFunc, Broadcast, AllReduce
 from parallel_pytorch.pipeline import Pipeline
 from parallel_pytorch.topology import Topology
 from parallel_pytorch.utils import global_rank, split_list
@@ -43,7 +43,7 @@ class MLP(nn.Module):
             nn.Linear(D, 4 * D // size, device=device),
             nn.ReLU(),
             nn.Linear(4 * D // size, D, device=device),
-            SumReduce(topo.model_comm),
+            AllReduce(topo.model_comm),
         )
 
     def forward(self, x):
@@ -83,7 +83,7 @@ class CausalSelfAttention(nn.Module):
         self.resid_drop = nn.Dropout(resid_pdrop)
         # output projection
         self.proj = nn.Linear(n_embd // size, n_embd, device=device)
-        self.sr = SumReduce(topo.model_comm)
+        self.sr = AllReduce(topo.model_comm)
         # causal mask to ensure that attention is only applied to the left in the input sequence
         self.register_buffer("mask", torch.tril(torch.ones(block_size, block_size, device=device))
                                      .view(1, 1, block_size, block_size))
@@ -278,9 +278,15 @@ def configure_optimizers(pipeline: Pipeline, learning_rate, weight_decay, betas)
     return optimizer
 
 
-def criterion(topo, logits, targets):
+def criterion(topo: Topology, logits, targets):
     if topo.is_last_pipeline_stage():
         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+
+        # Now, we need to sum the loss across the data parallel dimension
+        if topo.is_root_model_rank():
+            loss = AllReduceFunc.apply(loss, topo.per_stage_dp_comm)
+
+        return loss
+
     else:
         return logits
-    return loss

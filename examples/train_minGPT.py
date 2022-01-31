@@ -5,10 +5,11 @@ import torch
 import fire
 import logging
 import itertools
+from parallel_pytorch.data import aggregate_gradients, scatter_batch
 
 from parallel_pytorch.models.minGPT import configure_optimizers, criterion, make_pipelined_GPT
 from parallel_pytorch.topology import Topology
-from parallel_pytorch.utils import set_seed
+from parallel_pytorch.utils import global_rank, set_seed
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,9 @@ def main(
     running_loss = 0
     for it, (x, y) in enumerate(data):
 
+        # First we want to scatter the batch across all of the data parallel copies.
+        x, y = scatter_batch(topo=topo, inputs=x, labels=y)
+
         optimizer.zero_grad()
 
         # As usual, forward the model and compute loss.
@@ -96,6 +100,10 @@ def main(
         loss.backward()
         pipeline.backward(logits.grad)
 
+        # Now, for each of our parameters, PyTorch has populated a `.grad` member on each of our parameters.
+        # Since we are doing data parallelism, we must aggregate these gradients now.
+        aggregate_gradients(topo=topo, model=pipeline.stage)
+
         # Fortunately, PyTorch aggregates the gradients for us if we call `forward()` multiple times
         # (which we do in the pipeline with "micro batches").
         # Thus, we can just step the optimizer as we normally do.
@@ -105,7 +113,8 @@ def main(
         # if we're at the last stage of the pipeline.
         # Additionally, since there might be multiple model-parallel processes, we must make sure
         # to print on just the root one.
-        if topo.is_last_pipeline_stage() and topo.model_comm.Get_rank() == 0:
+        # Lastly, since there are multiple data parallel copies, we want to only print on the first one.
+        if topo.is_last_pipeline_stage() and topo.is_root_model_rank() and topo.get_data_parallel_idx() == 0:
             running_loss += loss.item()
             logger.info(f'batch {it} loss: {running_loss:.3f}')
             running_loss = 0.0

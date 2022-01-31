@@ -7,10 +7,10 @@ import torch
 import torch.nn as nn
 from mpi4py import MPI
 
-from parallel_pytorch.utils import prep_tensor_for_mpi_op
+from parallel_pytorch.utils import global_rank, prep_tensor_for_mpi_op
 
 
-class _Broadcast(torch.autograd.Function):
+class BroadcastFunc(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x, comm):
@@ -34,10 +34,10 @@ class Broadcast(nn.Module):
         self.comm = comm
 
     def forward(self, x):
-        return _Broadcast.apply(x, self.comm)
+        return BroadcastFunc.apply(x, self.comm)
 
 
-class _SumReduce(torch.autograd.Function):
+class AllReduceFunc(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x, comm):
@@ -53,7 +53,7 @@ class _SumReduce(torch.autograd.Function):
         return grad, None, None, None
 
 
-class SumReduce(nn.Module):
+class AllReduce(nn.Module):
     """ Sum-reduce all tensors down to the root worker """
 
     def __init__(self, comm):
@@ -61,17 +61,23 @@ class SumReduce(nn.Module):
         self.comm = comm
 
     def forward(self, x):
-        return _SumReduce.apply(x, self.comm)
+        return AllReduceFunc.apply(x, self.comm)
 
 
-class _Scatter(torch.autograd.Function):
+class ScatterFunc(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x, comm):
         ctx.comm = comm
         x = prep_tensor_for_mpi_op(x)
-        ctx.comm.Scatter(sendbuf=x, recvbuf=MPI.IN_PLACE, root=0)
-        return x
+        # TODO: use an allocator
+        recvbuf = torch.empty(x.size()[1:], dtype=x.dtype)
+        if comm.Get_rank() == 0:
+            sendbuf = x
+        else:
+            sendbuf = None
+        ctx.comm.Scatter(sendbuf=sendbuf, recvbuf=recvbuf, root=0)
+        return recvbuf
 
     @staticmethod
     def backward(ctx, grad):
@@ -89,10 +95,10 @@ class Scatter(nn.Module):
 
     def forward(self, x):
         assert x.shape[0] == self.comm.Get_size()
-        return _Scatter.apply(x, self.comm)
+        return ScatterFunc.apply(x, self.comm)
 
 
-class _Gather(torch.autograd.Function):
+class GatherFunc(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x, comm):
@@ -116,4 +122,4 @@ class Gather(nn.Module):
         self.comm = comm
 
     def forward(self, x):
-        return _Gather.apply(x, self.comm)
+        return GatherFunc.apply(x, self.comm)
