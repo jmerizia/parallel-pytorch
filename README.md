@@ -15,7 +15,7 @@ but aims to be feature complete for transformers.
 core
 - [X] model parallel primitives
 - [X] pipeline scheduler
-- [ ] data parallel
+- [X] data parallel
 - [ ] checkpointing
 - [ ] MoE
 - [X] weight initialization
