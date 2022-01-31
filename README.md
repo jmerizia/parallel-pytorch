@@ -26,6 +26,7 @@ core
 
 models
 - [X] minGPT
+- [ ] GPT-2
 - [ ] ViT
 - [ ] GPT-J
 
