@@ -18,12 +18,6 @@ class Topology:
     final_stage_pipe_dp_comm rank  0  0  0  0  0  0  0  0  1  1  1  1  1  1  1  1
     GPUs                           ( cuda:0 )  ( cuda:1 )  ( cuda:2 )  ( cuda:3 )
 
-    world rank                     0  1  2  3  4  5  6  7
-    data_comm rank                 0  1  2  3  4  5  6  7
-    pipeline_comm rank             0  1  2  3  0  1  2  3
-    model_comm rank                0  1  0  1  0  1  0  1
-    per_stage_dp_comm rank         0  .  0  .  1  .  1  .
-
     """
 
 
