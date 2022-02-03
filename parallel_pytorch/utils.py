@@ -47,14 +47,6 @@ def compute_devices_per_node():
     return count
 
 
-def compute_devices_per_node():
-    comm = MPI.COMM_WORLD
-    count = torch.cuda.device_count()
-    counts = comm.allgather(count)
-    assert len(set(counts)) == 1, "Some nodes have differing numbers of devices"
-    return count
-
-
 def prep_tensor_for_mpi_op(t):
     t = t.detach()
     t = t.contiguous()

@@ -11,12 +11,12 @@ class Topology:
     For example, consider if dp = 2, pp = 2, and dp = 4,
     then these would be the ranks of the communicators:
 
-    world rank                     0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
-    data_comm rank                 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
-    pipeline_comm rank             0  1  2  3  4  5  6  7  0  1  2  3  4  5  6  7
-    model_comm rank                0  1  2  3  0  1  2  3  0  1  2  3  0  1  2  3
-    final_stage_pipe_dp_comm rank  0  0  0  0  0  0  0  0  1  1  1  1  1  1  1  1
-    GPUs                           ( cuda:0 )  ( cuda:1 )  ( cuda:2 )  ( cuda:3 )
+    world rank              0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
+    data_comm rank          0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
+    pipeline_comm rank      0  1  2  3  4  5  6  7  0  1  2  3  4  5  6  7
+    model_comm rank         0  1  2  3  0  1  2  3  0  1  2  3  0  1  2  3
+    per_stage_dp_comm rank  0  0  0  0  0  0  0  0  1  1  1  1  1  1  1  1
+    GPUs                    ( cuda:0 )  ( cuda:1 )  ( cuda:2 )  ( cuda:3 )
 
     """
 
@@ -37,8 +37,11 @@ class Topology:
             assert self.mp == compute_devices_per_node(), \
                 "Topology.mp must be equal to the number of devices on each node, or else deadlocks can occur."
         world = MPI.COMM_WORLD
-        assert world.Get_size() == self.dp * self.pp * self.mp
-        self.data_comm = world
+        size = self.dp * self.pp * self.mp
+        assert world.Get_size() >= size, \
+            "Topology.dp * Topology.pp * Topology.mp must be less than or equal to the number of processes."
+        self.active = world.Get_rank() < size
+        self.data_comm = world.Split(color=0 if self.active else 1, key=world.Get_rank())
         data_rank = self.data_comm.Get_rank()
         self.pipeline_comm = self.data_comm.Split(color=data_rank // (self.pp * self.mp), key=data_rank)
         pipeline_rank = self.pipeline_comm.Get_rank()

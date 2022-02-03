@@ -45,6 +45,12 @@ def main(
     # about the overall shape of the network.
     topo = Topology(dp=dp, pp=pp, mp=mp)
 
+    # The total number of workers that participate is dp * pp * mp.
+    # Thus, there may be a few workers that do not participate.
+    if not topo.active:
+        logger.info("I, worker %d, am not active", topo.data_comm.Get_rank())
+        return
+
     # We set the seed in torch/numpy/random to the current rank to ensure that weight initialization
     # happens differently on all ranks.
     set_seed(seed * topo.data_comm.Get_rank())
@@ -134,8 +140,6 @@ def main(
     # and it will be collapsed in the model parallel dimension.
     if topo.is_root_model_rank() and topo.get_data_parallel_idx() == 0:
         torch.save(state_dict, f'checkpoint_stage{topo.get_pipeline_stage_idx()}.pt')
-
-    MPI.COMM_WORLD.Barrier()
 
 
 if __name__ == '__main__':

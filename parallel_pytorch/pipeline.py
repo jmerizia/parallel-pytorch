@@ -6,6 +6,7 @@ from collections import OrderedDict
 from typing import List
 import torch
 from parallel_pytorch.module import ParallelModule
+from mpi4py import MPI
 
 from parallel_pytorch.topology import Topology
 from parallel_pytorch.utils import prep_tensor_for_mpi_op
@@ -33,11 +34,23 @@ class Pipeline:
     def __call__(self, batches: torch.Tensor):
         return self.forward(batches)
 
-    def parallel_state_dict(self, prefix=''):
-        # TODO: aggregate state dicts across stages
+    def parallel_state_dict(self, prefix='', merge=False):
         d = OrderedDict()
         stage_idx = self.topo.get_pipeline_stage_idx()
         d.update(self.stage.parallel_state_dict(prefix=prefix + f'stage_{stage_idx}.'))
+        # merge the state dicts of all stages
+        if merge:
+            if self.topo.is_root_model_rank() and self.topo.get_data_parallel_idx() == 0:
+                pass
+            else:
+                d = None
+            d = self.topo.data_comm.gather(d)
+            d_merged = OrderedDict()
+            for e in d:
+                if e is not None:
+                    for k, v in e.items():
+                        d_merged[k] = v
+            d = d_merged
         return d
 
     def parallel_load_state_dict(self, state_dict, prefix=''):
