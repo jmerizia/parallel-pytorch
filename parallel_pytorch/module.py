@@ -2,8 +2,6 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 
-from parallel_pytorch.topology import Topology
-
 
 class ParallelModule(nn.Module):
     """

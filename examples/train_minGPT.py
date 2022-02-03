@@ -4,13 +4,12 @@
 import torch
 import fire
 import logging
-import itertools
 from parallel_pytorch.data import aggregate_gradients, scatter_batch
 from mpi4py import MPI
 
 from parallel_pytorch.models.minGPT import configure_optimizers, criterion, make_pipelined_GPT
 from parallel_pytorch.topology import Topology
-from parallel_pytorch.utils import global_rank, set_seed
+from parallel_pytorch.utils import set_seed
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,6 @@ GPT model:
 - the final decoder is a linear projection into a vanilla Softmax classifier
 """
 
-from collections import OrderedDict
 import math
 import logging
 import time
@@ -19,7 +18,7 @@ from torch.nn import functional as F
 
 from parallel_pytorch.layers import DistributedEmbedding, LinearDistributedInput, LinearDistributedOutput, ParallelSequential
 from parallel_pytorch.module import ParallelModule
-from parallel_pytorch.ops import AllSumReduceFunc, Broadcast, AllSumReduce, tensor_merge
+from parallel_pytorch.ops import AllSumReduceFunc, Broadcast, AllSumReduce
 from parallel_pytorch.pipeline import Pipeline
 from parallel_pytorch.topology import Topology
 from parallel_pytorch.utils import split_list

@@ -24,6 +24,7 @@ core
 - [ ] CUDA support
 - [ ] Dockerfile
 - [ ] ability to run larger models on less GPU space with pipeline+offload
+- [ ] function to split pipeline layers by # params
 
 models
 - [X] minGPT

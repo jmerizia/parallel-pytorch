@@ -4,12 +4,11 @@ A simple pipeline scheduler that plays nicely with PyTorch.
 
 from collections import OrderedDict
 from typing import List
-import torch.nn as nn
 import torch
 from parallel_pytorch.module import ParallelModule
 
 from parallel_pytorch.topology import Topology
-from parallel_pytorch.utils import global_rank, prep_tensor_for_mpi_op, split_list
+from parallel_pytorch.utils import prep_tensor_for_mpi_op
 
 
 class Pipeline:

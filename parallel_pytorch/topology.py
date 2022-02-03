@@ -1,7 +1,7 @@
 from typing import Literal
 from mpi4py import MPI
 
-from parallel_pytorch.utils import compute_devices_per_node, global_rank
+from parallel_pytorch.utils import compute_devices_per_node
 
 
 class Topology:
