@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from parallel_pytorch.ops import AllReduceFunc, ScatterFunc
+from parallel_pytorch.ops import AllSumReduceFunc, ScatterFunc
 
 from parallel_pytorch.topology import Topology
 
@@ -11,7 +11,7 @@ def aggregate_gradients(*, topo: Topology, model: nn.Module):
     """
 
     for p in model.parameters():
-        p.grad.data = AllReduceFunc.apply(p.grad.data, topo.per_stage_dp_comm)
+        p.grad.data = AllSumReduceFunc.apply(p.grad.data, topo.per_stage_dp_comm)
 
 
 def scatter_batch(*, topo: Topology, inputs: torch.Tensor, labels: torch.Tensor):

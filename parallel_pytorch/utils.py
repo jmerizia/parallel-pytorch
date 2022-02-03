@@ -1,3 +1,5 @@
+from functools import wraps
+import itertools
 import torch
 from typing import Any, List
 from mpi4py import MPI
@@ -60,3 +62,11 @@ def prep_tensor_for_mpi_op(t):
     if t.is_cuda:
         torch.cuda.current_stream().synchronize()
     return t
+
+
+def iter_cart_coords(shape, as_array=False):
+    elems = itertools.product(*[range(shape[dim]) for dim in range(len(shape))])
+    if not as_array:
+        return list(elems)
+    else:
+        return [np.array(e) for e in elems]

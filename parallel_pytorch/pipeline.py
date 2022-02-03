@@ -2,9 +2,11 @@
 A simple pipeline scheduler that plays nicely with PyTorch.
 """
 
+from collections import OrderedDict
 from typing import List
 import torch.nn as nn
 import torch
+from parallel_pytorch.module import ParallelModule
 
 from parallel_pytorch.topology import Topology
 from parallel_pytorch.utils import global_rank, prep_tensor_for_mpi_op, split_list
@@ -19,7 +21,7 @@ class Pipeline:
         self,
         *,
         topo: Topology,
-        stages: List[nn.Module],
+        stages: List[ParallelModule],
     ):
         super().__init__()
         self.topo = topo
@@ -31,6 +33,17 @@ class Pipeline:
 
     def __call__(self, batches: torch.Tensor):
         return self.forward(batches)
+
+    def parallel_state_dict(self, prefix=''):
+        # TODO: aggregate state dicts across stages
+        d = OrderedDict()
+        stage_idx = self.topo.get_pipeline_stage_idx()
+        d.update(self.stage.parallel_state_dict(prefix=prefix + f'stage_{stage_idx}.'))
+        return d
+
+    def parallel_load_state_dict(self, state_dict, prefix=''):
+        stage_idx = self.topo.get_pipeline_stage_idx()
+        self.stage.parallel_load_state_dict(state_dict, prefix=prefix + f'stage_{stage_idx}.')
 
     def forward(self, batches: torch.Tensor):
         self.inputs = []

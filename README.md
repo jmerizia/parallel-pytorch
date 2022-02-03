@@ -18,11 +18,12 @@ core
 - [X] data parallel
 - [ ] checkpointing
 - [ ] MoE
-- [X] weight initialization
+- [ ] weight initialization same across all scales
 - [ ] tests for correctness across various scales
 - [ ] enable sending arbitrary objects in pipeline scheduler
 - [ ] CUDA support
 - [ ] Dockerfile
+- [ ] ability to run larger models on less GPU space with pipeline+offload
 
 models
 - [X] minGPT
@@ -35,7 +36,11 @@ future performance improvements
 - [ ] gradient checkpointing for pipeline
 - [ ] benchmarking with NVTX
 - [ ] ZeRO optimizations
-- [ ] comtiguous allocator for temporary buffers
+- [ ] contiguous allocator for temporary buffers
+- [ ] more meticulous buffer sharing (based on lifetimes)
+
+misc
+- [ ] torchtyping
 
 ## Citations
 

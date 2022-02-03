@@ -8,6 +8,7 @@ GPT model:
 - the final decoder is a linear projection into a vanilla Softmax classifier
 """
 
+from collections import OrderedDict
 import math
 import logging
 import time
@@ -16,16 +17,17 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from parallel_pytorch.layers import DistributedEmbedding
-from parallel_pytorch.ops import AllReduceFunc, Broadcast, AllReduce
+from parallel_pytorch.layers import DistributedEmbedding, LinearDistributedInput, LinearDistributedOutput, ParallelSequential
+from parallel_pytorch.module import ParallelModule
+from parallel_pytorch.ops import AllSumReduceFunc, Broadcast, AllSumReduce, tensor_merge
 from parallel_pytorch.pipeline import Pipeline
 from parallel_pytorch.topology import Topology
-from parallel_pytorch.utils import global_rank, split_list
+from parallel_pytorch.utils import split_list
 
 logger = logging.getLogger(__name__)
 
 
-class MLP(nn.Module):
+class MLP(ParallelModule):
     def __init__(
         self,
         *,
@@ -35,22 +37,21 @@ class MLP(nn.Module):
     ):
         super().__init__()
         self.topo = topo
-        size = self.topo.model_comm.Get_size()
-        D = n_embd
-        assert (4 * D) % size == 0
-        self.mlp = nn.Sequential(
+        self.mlp = ParallelSequential(
             Broadcast(topo.model_comm),
-            nn.Linear(D, 4 * D // size, device=device),
+            LinearDistributedOutput(topo, n_embd, 4 * n_embd, device=device),
             nn.ReLU(),
-            nn.Linear(4 * D // size, D, device=device),
-            AllReduce(topo.model_comm),
+            LinearDistributedInput(topo, 4 * n_embd, n_embd, device=device, bias=False),
+            AllSumReduce(topo.model_comm),
         )
+        # This must be done _after_ the reduce, otherwise it will be redundantly added for each MP worker.
+        self.bias = nn.Parameter(torch.zeros((1, n_embd), device=device))
 
     def forward(self, x):
-        return self.mlp(x)
+        return self.mlp(x) + self.bias
 
 
-class CausalSelfAttention(nn.Module):
+class CausalSelfAttention(ParallelModule):
     """
     A vanilla multi-head masked self-attention layer with a projection at the end.
     It is possible to use torch.nn.MultiheadAttention here but I am including an
@@ -75,15 +76,15 @@ class CausalSelfAttention(nn.Module):
         assert (n_embd // size) % (n_head // size) == 0
         # key, query, value projections for all heads
         self.bc = Broadcast(topo.model_comm)
-        self.key = nn.Linear(n_embd, n_embd // size, device=device)
-        self.query = nn.Linear(n_embd, n_embd // size, device=device)
-        self.value = nn.Linear(n_embd, n_embd // size, device=device)
+        self.key = LinearDistributedOutput(topo, n_embd, n_embd, device=device)
+        self.query = LinearDistributedOutput(topo, n_embd, n_embd, device=device)
+        self.value = LinearDistributedOutput(topo, n_embd, n_embd, device=device)
         # regularization
         self.attn_drop = nn.Dropout(attn_pdrop)
         self.resid_drop = nn.Dropout(resid_pdrop)
         # output projection
-        self.proj = nn.Linear(n_embd // size, n_embd, device=device)
-        self.sr = AllReduce(topo.model_comm)
+        self.proj = LinearDistributedInput(topo, n_embd, n_embd, device=device)
+        self.sr = AllSumReduce(topo.model_comm)
         # causal mask to ensure that attention is only applied to the left in the input sequence
         self.register_buffer("mask", torch.tril(torch.ones(block_size, block_size, device=device))
                                      .view(1, 1, block_size, block_size))
@@ -116,7 +117,8 @@ class CausalSelfAttention(nn.Module):
         y = self.resid_drop(y)
         return y
 
-class Block(nn.Module):
+
+class Block(ParallelModule):
     """ an unassuming Transformer block """
 
     def __init__(
@@ -201,10 +203,10 @@ def make_pipelined_GPT(
         drop,
         *blocks,
         ln_f,
-        head
+        head,
     ]
     stages = split_list(layers, topo.get_num_pipeline_stages())
-    stages = [nn.Sequential(*stage) for stage in stages]
+    stages = [ParallelSequential(*stage) for stage in stages]
     pipeline = Pipeline(topo=topo, stages=stages)
 
     def _init_weights(module):
@@ -284,9 +286,32 @@ def criterion(topo: Topology, logits, targets):
 
         # Now, we need to sum the loss across the data parallel dimension
         if topo.is_root_model_rank():
-            loss = AllReduceFunc.apply(loss, topo.per_stage_dp_comm)
+            loss = AllSumReduceFunc.apply(loss, topo.per_stage_dp_comm)
 
         return loss
 
     else:
         return logits
+
+
+# def save_checkpoint(pipeline: Pipeline, checkpoint_fn: str):
+#     """
+#     Loads the model's parameters from the given state dict, by sharding the correct shape out of it.
+#     The state dict only needs only to exist on the root rank.
+#     """
+
+    # topo = pipeline.topo
+    # stage_idx = topo.get_pipeline_stage_idx()
+    # state_dict = pipeline.stage.state_dict()
+    # torch.save(state_dict, stage_idx)
+
+
+# def load_checkpoint(pipeline: Pipeline, checkpoint_fn: str):
+#     """
+#     Loads the model's parameters from the given state dict, by sharding the correct shape out of it.
+#     The state dict only needs only to exist on the root rank.
+#     """
+
+#     state_dict = torch.load(checkpoint_fn)
+#     pipeline.stage.load_state_dict
+#     state_dict
