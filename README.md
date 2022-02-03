@@ -17,14 +17,15 @@ core
 - [X] pipeline scheduler
 - [X] data parallel
 - [X] checkpointing
-- [ ] MoE
-- [ ] weight initialization same across all scales
 - [ ] tests for correctness across various scales
 - [ ] enable sending arbitrary objects in pipeline scheduler
+- [ ] function to split pipeline layers by # params
 - [ ] CUDA support
+- [ ] weight initialization same across all scales
+- [ ] MoE
 - [ ] Dockerfile
 - [ ] ability to run larger models on less GPU space with pipeline+offload
-- [ ] function to split pipeline layers by # params
+- [ ] benchmarking/flame-graph
 
 models
 - [X] minGPT
@@ -33,7 +34,6 @@ models
 - [ ] GPT-J
 
 future performance improvements
-- [ ] benchmark against existing solutions
 - [ ] gradient checkpointing for pipeline
 - [ ] benchmarking with NVTX
 - [ ] ZeRO optimizations
