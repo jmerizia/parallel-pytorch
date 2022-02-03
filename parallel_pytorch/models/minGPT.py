@@ -291,26 +291,3 @@ def criterion(topo: Topology, logits, targets):
 
     else:
         return logits
-
-
-# def save_checkpoint(pipeline: Pipeline, checkpoint_fn: str):
-#     """
-#     Loads the model's parameters from the given state dict, by sharding the correct shape out of it.
-#     The state dict only needs only to exist on the root rank.
-#     """
-
-    # topo = pipeline.topo
-    # stage_idx = topo.get_pipeline_stage_idx()
-    # state_dict = pipeline.stage.state_dict()
-    # torch.save(state_dict, stage_idx)
-
-
-# def load_checkpoint(pipeline: Pipeline, checkpoint_fn: str):
-#     """
-#     Loads the model's parameters from the given state dict, by sharding the correct shape out of it.
-#     The state dict only needs only to exist on the root rank.
-#     """
-
-#     state_dict = torch.load(checkpoint_fn)
-#     pipeline.stage.load_state_dict
-#     state_dict
