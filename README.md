@@ -16,7 +16,7 @@ core
 - [X] model parallel primitives
 - [X] pipeline scheduler
 - [X] data parallel
-- [ ] checkpointing
+- [X] checkpointing
 - [ ] MoE
 - [ ] weight initialization same across all scales
 - [ ] tests for correctness across various scales
