@@ -18,7 +18,7 @@ class ParallelSequential(nn.Sequential, ParallelModule):
 
 class LinearDistributedOutput(ParallelModule):
     """
-    This is distributed linear layer which takes a non-sharded input
+    This is a distributed linear layer which takes a non-sharded input
     and produces a sharded output.
     """
 
@@ -34,7 +34,7 @@ class LinearDistributedOutput(ParallelModule):
         self.topo = topo
         size = topo.model_comm.Get_size()
         assert out_size % size == 0, \
-            "Expected output size to be divisibly by the number of model parallel workers."
+            "Expected output size to be divisible by the number of model parallel workers."
         self.ff = nn.Linear(in_size, out_size // size, bias=bias, device=device)
         self.bias = bias
 
@@ -60,7 +60,7 @@ class LinearDistributedOutput(ParallelModule):
 
 class LinearDistributedInput(ParallelModule):
     """
-    This is distributed linear layer which takes a sharded input
+    This is a distributed linear layer which takes a sharded input
     and produces a non-sharded output.
     """
 
@@ -76,7 +76,7 @@ class LinearDistributedInput(ParallelModule):
         self.topo = topo
         size = topo.model_comm.Get_size()
         assert in_size % size == 0, \
-            "Expected input size to be divisibly by the number of model parallel workers."
+            "Expected input size to be divisible by the number of model parallel workers."
         self.ff = nn.Linear(in_size // size, out_size, bias=bias, device=device)
         self.bias = bias
 
