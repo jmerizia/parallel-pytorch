@@ -82,7 +82,6 @@ def split_list_weighted(elems: List[Any], weights: List[int], parts: int):
     for _ in range(30):
         mid = (l + r) // 2
         ans = solve(mid)
-        # print(mid, l, solve(l), r, solve(r), ans is not None)
         if solve(mid) is not None:
             r = mid
         else:
