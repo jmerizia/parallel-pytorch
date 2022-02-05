@@ -64,10 +64,11 @@ def tensor_Gather(x, comm, recvbuf=None):
     x = prep_tensor_for_mpi_op(x)
     size = comm.Get_size()
     shape = [size] + list(x.size())
-    if recvbuf is not None:
-        assert list(recvbuf.size()) == shape
-    else:
-        recvbuf = torch.empty(shape, dtype=x.dtype, device=x.device)
+    if comm.Get_rank() == 0:
+        if recvbuf is not None:
+            assert list(recvbuf.size()) == shape
+        else:
+            recvbuf = torch.empty(shape, dtype=x.dtype, device=x.device)
     comm.Gather(sendbuf=x, recvbuf=recvbuf, root=0)
     return recvbuf
 
@@ -77,6 +78,7 @@ def tensor_merge(x, comm, worker_shape, recvbuf=None, y_buf=None):
     This takes a tensor x, which is sharded across the communicator with a
     certain worker grid shape, and merges it down to the root worker.
     All shards of x must have the same shape.
+    Only rank 0 will return a torch tensor. All other ranks will return None.
     """
 
     worker_shape = np.array(worker_shape)
@@ -84,19 +86,22 @@ def tensor_merge(x, comm, worker_shape, recvbuf=None, y_buf=None):
     assert worker_volume == comm.Get_size()
     x_shape = np.array(x.size())
     y_shape = x_shape * worker_shape
-    if y_buf is None:
-        y = torch.empty(list(y_shape), dtype=x.dtype, device=x.device)
-    else:
-        assert list(y_buf.size()) == list(y_shape)
-        y = y_buf
     x = tensor_Gather(x, comm, recvbuf=recvbuf)
-    # Now x is of shape [comm.Get_size(), ...], so we have to reshape it to shape y_shape
-    for idx, coord in enumerate(iter_cart_coords(worker_shape, as_array=True)):
-        a = coord * x_shape
-        b = (coord + 1) * x_shape
-        s = [slice(i, j) for i, j in zip(a, b)]
-        y[s] = x[idx]
-    return y
+    if comm.Get_rank() == 0:
+        if y_buf is None:
+            y = torch.empty(list(y_shape), dtype=x.dtype, device=x.device)
+        else:
+            assert list(y_buf.size()) == list(y_shape)
+            y = y_buf
+        # Now x is of shape [comm.Get_size(), ...], so we have to reshape it to shape y_shape
+        for idx, coord in enumerate(iter_cart_coords(worker_shape, as_array=True)):
+            a = coord * x_shape
+            b = (coord + 1) * x_shape
+            s = [slice(i, j) for i, j in zip(a, b)]
+            y[s] = x[idx]
+        return y
+    else:
+        return None
 
 
 def tensor_split(x, comm, worker_shape, recvbuf=None, y_buf=None):
@@ -133,7 +138,7 @@ class BroadcastFunc(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, comm):
         ctx.comm = comm
-        return tensor_Gather(x, comm)
+        return tensor_Bcast(x, comm)
 
     @staticmethod
     def backward(ctx, grad):

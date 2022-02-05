@@ -2,17 +2,19 @@
 A simple pipeline scheduler that plays nicely with PyTorch.
 """
 
-from collections import OrderedDict
-from typing import List
+from collections import OrderedDict, defaultdict
+from pathlib import Path
+from typing import List, OrderedDict as OrderedDictType
 import torch
+from parallel_pytorch.layers import ParallelSequential
 from parallel_pytorch.module import ParallelModule
-from mpi4py import MPI
+import os
 
 from parallel_pytorch.topology import Topology
-from parallel_pytorch.utils import prep_tensor_for_mpi_op
+from parallel_pytorch.utils import cumsum, global_rank, prep_tensor_for_mpi_op, split_list
 
 
-class Pipeline:
+class Pipeline(object):
     """
     An implementation of the standard GPipe pipeline schedule.
     """
@@ -21,10 +23,14 @@ class Pipeline:
         self,
         *,
         topo: Topology,
-        stages: List[ParallelModule],
+        layers: List[ParallelModule],
     ):
         super().__init__()
         self.topo = topo
+        stages = split_list(layers, topo.get_num_pipeline_stages())
+        stage_idx = topo.get_pipeline_stage_idx()
+        self.layer_offset = cumsum([0] + [len(stage) for stage in stages])[stage_idx]
+        stages = [ParallelSequential(*stage) for stage in stages]
         assert len(stages) == topo.get_num_pipeline_stages()
         self.stage = stages[topo.get_pipeline_stage_idx()]
         for idx, stage in enumerate(stages):
@@ -34,28 +40,45 @@ class Pipeline:
     def __call__(self, batches: torch.Tensor):
         return self.forward(batches)
 
-    def parallel_state_dict(self, prefix='', merge=False):
-        d = OrderedDict()
-        stage_idx = self.topo.get_pipeline_stage_idx()
-        d.update(self.stage.parallel_state_dict(prefix=prefix + f'stage_{stage_idx}.'))
-        # merge the state dicts of all stages
-        if merge:
-            if self.topo.is_root_model_rank() and self.topo.get_data_parallel_idx() == 0:
-                pass
-            else:
-                d = None
-            d = self.topo.data_comm.gather(d)
-            d_merged = OrderedDict()
-            for e in d:
-                if e is not None:
-                    for k, v in e.items():
-                        d_merged[k] = v
-            d = d_merged
-        return d
+    def save_checkpoint(self, checkpoint_directory: str):
+        """
+        Saves a checkpoint of this pipeline as a sequence of files, one per layer in the pipeline.
+        The given directory will be filled with the individual checkpoint files.
+        """
 
-    def parallel_load_state_dict(self, state_dict, prefix=''):
-        stage_idx = self.topo.get_pipeline_stage_idx()
-        self.stage.parallel_load_state_dict(state_dict, prefix=prefix + f'stage_{stage_idx}.')
+        if self.topo.data_comm.Get_rank() == 0:
+            Path(checkpoint_directory).mkdir(exist_ok=True)
+
+        if self.topo.get_data_parallel_idx() == 0:
+            state_dict = self.stage.parallel_state_dict()
+            # split the state dict into per-layer state dicts
+            buckets = [OrderedDict()] * len(list(self.stage.children()))
+            for name, param in state_dict.items():
+                idx = int(name.split('.')[0])
+                new_name = '.'.join(name.split('.')[1:])
+                buckets[idx][new_name] = param
+            for idx, bucket in enumerate(buckets):
+                fn = os.path.join(checkpoint_directory, f'layer_{self.layer_offset + idx}.pt')
+                torch.save(bucket, fn)
+        self.topo.data_comm.Barrier()
+
+    def load_checkpoint(self, checkpoint_directory: str):
+        """
+        Loads a checkpoint from a sequence of files, one per layer in the pipeline.
+        The given directory should point at the directory containing the per-layer files.
+        """
+
+        # all dp copies should load the file
+        state_dict = OrderedDict()
+        for idx in range(len(list(self.stage.children()))):
+            fn = os.path.join(checkpoint_directory, f'layer_{self.layer_offset + idx}.pt')
+            bucket = torch.load(fn)
+            for name, param in bucket.items():
+                new_name = str(idx) + '.' + name
+                state_dict[new_name] = param
+            state_dict.update(bucket)
+        self.stage.parallel_load_state_dict(state_dict)
+        self.topo.data_comm.Barrier()
 
     def forward(self, batches: torch.Tensor):
         self.inputs = []

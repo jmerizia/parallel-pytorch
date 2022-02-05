@@ -4,7 +4,7 @@ from mpi4py import MPI
 from parallel_pytorch.utils import compute_devices_per_node
 
 
-class Topology:
+class Topology(object):
     """
     A tiny class that stores all the MPI communicators and rank relationships.
 
@@ -29,6 +29,12 @@ class Topology:
         mp: int,
         device: Literal['cpu', 'cuda'] = 'cpu',
     ):
+        assert dp > 0, \
+            f"dp must be greater than 0, but got {dp}"
+        assert pp > 0, \
+            f"pp must be greater than 0, but got {pp}"
+        assert mp > 0, \
+            f"mp must be greater than 0, but got {mp}"
         self.dp = dp
         self.pp = pp
         self.mp = mp
@@ -63,7 +69,7 @@ class Topology:
         return self.data_comm.Get_size() // self.pipeline_comm.Get_size()
 
     def get_data_parallel_idx(self):
-        return self.data_comm.Get_rank() // self.pipeline_comm.Get_size()
+        return self.per_stage_dp_comm.Get_rank()
 
     ################
     #   PIPELINE   #

@@ -1,6 +1,7 @@
 # Run this program with `mpirun`. For example:
 #   mpirun -np 4 python ./examples/train_minGPT.py --pp=2 --mp=2
 
+from pathlib import Path
 import torch
 import fire
 import logging
@@ -9,7 +10,7 @@ from mpi4py import MPI
 
 from parallel_pytorch.models.minGPT import configure_optimizers, criterion, make_pipelined_GPT
 from parallel_pytorch.topology import Topology
-from parallel_pytorch.utils import set_seed
+from parallel_pytorch.utils import set_seed, abort_on_exception
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ logging.basicConfig(
 )
 
 
+@abort_on_exception
 def main(
     dp=1,
     pp=1,
@@ -36,7 +38,8 @@ def main(
     learning_rate=0.1,
     weight_decay=0.1,
     betas=(0.9, 0.95),
-    from_checkpoint=False,
+    init_checkpoint_directory=None,
+    out_checkpoint_directory=None,
     seed=42,
 ):
     """ Train a simple minGPT model with 3D parallelism. """
@@ -70,12 +73,12 @@ def main(
         resid_pdrop=resid_pdrop,
     )
 
-    if from_checkpoint:
-        # Here is how you load a checkpoint. Pipeline and any ParallelModule objects have a `parallel_load_state_dict()`
-        # function which can load a state dict. This is similar to torch.nn.Module.load_state_dict(),
-        # but it is recursive, which makes it easier to deal with in parallel.
-        state_dict = torch.load(f'checkpoint_stage{topo.get_pipeline_stage_idx()}.pt')
-        pipeline.parallel_load_state_dict(state_dict)
+    if init_checkpoint_directory is not None:
+        # Due to the size of checkpoints of large models, dealing with one large file is unrealistic.
+        # Instead, we collapse along the model-parallel dimension, and then save one file
+        # per block of the neural network.
+        # That allows us to save checkpoints efficiently and agnostically to the parallelization topology.
+        pipeline.load_checkpoint(init_checkpoint_directory)
 
     # Generate some fake data. Technically we only need it on the first and last stages of the pipeline,
     # but text data isn't so expensive to load in on all ranks.
@@ -133,13 +136,10 @@ def main(
             logger.info(f'batch {it} loss: {running_loss:.3f}')
             running_loss = 0.0
 
-    # Here's how we can save our model. Pipelines and any ParallelModule objects have a `parallel_state_dict()`
-    # function which is a recursive replacement to `state_dict()`.
-    state_dict = pipeline.parallel_state_dict()
-    # Now, the state dict will be different depending on which stage of the pipeline we are at,
-    # and it will be collapsed in the model parallel dimension.
-    if topo.is_root_model_rank() and topo.get_data_parallel_idx() == 0:
-        torch.save(state_dict, f'checkpoint_stage{topo.get_pipeline_stage_idx()}.pt')
+    if out_checkpoint_directory is not None:
+        # Lastly, we'll save a checkpoint of our pipeline. As mentioned before, checkpoints for pipelines
+        # are saved as multilple files, one per layer in the pipeline.
+        pipeline.save_checkpoint(out_checkpoint_directory)
 
 
 if __name__ == '__main__':

@@ -1,9 +1,11 @@
+from functools import wraps
 import itertools
 import torch
 from typing import Any, List
 from mpi4py import MPI
 import random
 import numpy as np
+import traceback
 
 
 def set_seed(seed):
@@ -61,3 +63,18 @@ def iter_cart_coords(shape, as_array=False):
         return list(elems)
     else:
         return [np.array(e) for e in elems]
+
+
+def abort_on_exception(f):
+    """
+    If any MPI child process raises an error, this will abort all MPI processes,
+    ensuring the program is killed, rather than deadlocks.
+    """
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except:
+            print(traceback.format_exc(), flush=True)
+            MPI.COMM_WORLD.Abort(1)
+    return wrapper
