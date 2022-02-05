@@ -2,16 +2,16 @@
 A simple pipeline scheduler that plays nicely with PyTorch.
 """
 
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict
 from pathlib import Path
-from typing import List, OrderedDict as OrderedDictType
+from typing import List
 import torch
 from parallel_pytorch.layers import ParallelSequential
 from parallel_pytorch.module import ParallelModule
 import os
 
 from parallel_pytorch.topology import Topology
-from parallel_pytorch.utils import cumsum, global_rank, prep_tensor_for_mpi_op, split_list
+from parallel_pytorch.utils import cumsum, prep_tensor_for_mpi_op, split_list
 
 
 class Pipeline(object):

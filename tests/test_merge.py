@@ -1,4 +1,3 @@
-import unittest
 import torch
 import numpy as np
 from mpi4py import MPI

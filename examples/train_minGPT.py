@@ -1,12 +1,13 @@
 # Run this program with `mpirun`. For example:
-#   mpirun -np 4 python ./examples/train_minGPT.py --pp=2 --mp=2
+#   mpirun -np 4 python ./examples/train_minGPT.py --dp=1 --pp=2 --mp=2
+# You can modulate dp, pp, and mp, which stand for the size of the
+# data, pipeline, abd model parallel dimensions respectively.
+# dp * pp * mp must equal the total number of workers.
 
-from pathlib import Path
 import torch
 import fire
 import logging
 from parallel_pytorch.data import aggregate_gradients, scatter_batch
-from mpi4py import MPI
 
 from parallel_pytorch.models.minGPT import configure_optimizers, criterion, make_pipelined_GPT
 from parallel_pytorch.topology import Topology

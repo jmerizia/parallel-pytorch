@@ -1,10 +1,6 @@
-# mpirun -np 8 python ./tests/test_save_load_checkpoints.py
-
 import torch
 import torch.nn as nn
 from mpi4py import MPI 
-import tempfile
-import os
 from pathlib import Path
 import shutil
 

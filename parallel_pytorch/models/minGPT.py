@@ -10,7 +10,6 @@ GPT model:
 
 import math
 import logging
-import time
 
 import torch
 import torch.nn as nn
@@ -21,7 +20,6 @@ from parallel_pytorch.module import ParallelModule
 from parallel_pytorch.ops import AllSumReduceFunc, Broadcast, AllSumReduce
 from parallel_pytorch.pipeline import Pipeline
 from parallel_pytorch.topology import Topology
-from parallel_pytorch.utils import split_list
 
 logger = logging.getLogger(__name__)
 
