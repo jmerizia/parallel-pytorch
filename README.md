@@ -19,7 +19,7 @@ core
 - [X] checkpointing
 - [ ] tests for correctness across various scales
 - [ ] enable sending arbitrary objects in pipeline scheduler
-- [ ] function to split pipeline layers by # params
+- [X] function to split pipeline layers by # params
 - [ ] CUDA support
 - [ ] weight initialization same across all scales
 - [ ] MoE

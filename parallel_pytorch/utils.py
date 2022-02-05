@@ -37,6 +37,62 @@ def split_list(v: List[Any], parts: int):
     return [v[o:o+s] for o, s in zip(offsets, sizes)]
 
 
+def split_list_weighted(elems: List[Any], weights: List[int], parts: int):
+    """
+    Splits `elems` into `parts` subarrays such that the maximum associated positive weight is minimized.
+    """
+
+    assert len(elems) == len(weights)
+    assert parts > 0
+    assert len(elems) > 0
+    for w in weights:
+        assert w >= 0
+
+    def solve(k):
+        ans = [[elems[0]]]
+        t = weights[0]
+        for e, w in zip(elems[1:], weights[1:]):
+            if t > k:
+                return None
+            if t + w <= k:
+                t += w
+                ans[-1].append(e)
+            else:
+                t = w
+                ans.append([e])
+        if len(ans) <= parts:
+            for _ in range(parts - len(ans)):
+                found = False
+                for i, l in enumerate(ans):
+                    if len(l) > 1:
+                        found = True
+                        l1 = l[:1]
+                        l2 = l[1:]
+                        ans[i] = l1
+                        ans.insert(i+1, l2)
+                        break
+                if not found:
+                    return None
+            return ans
+        else:
+            return None
+
+    # binary search
+    l, r = 1, sum(weights)
+    for _ in range(30):
+        mid = (l + r) // 2
+        ans = solve(mid)
+        # print(mid, l, solve(l), r, solve(r), ans is not None)
+        if solve(mid) is not None:
+            r = mid
+        else:
+            l = mid
+
+    ans = solve(r)
+    assert ans
+    return ans
+
+
 def global_rank():
     return MPI.COMM_WORLD.Get_rank()
 

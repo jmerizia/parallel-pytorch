@@ -11,7 +11,7 @@ from parallel_pytorch.module import ParallelModule
 import os
 
 from parallel_pytorch.topology import Topology
-from parallel_pytorch.utils import cumsum, prep_tensor_for_mpi_op, split_list
+from parallel_pytorch.utils import cumsum, prep_tensor_for_mpi_op, split_list, split_list_weighted
 
 
 class Pipeline(object):
@@ -27,7 +27,8 @@ class Pipeline(object):
     ):
         super().__init__()
         self.topo = topo
-        stages = split_list(layers, topo.get_num_pipeline_stages())
+        param_counts = [sum(p.numel() for p in layer.parameters()) for layer in layers]
+        stages = split_list_weighted(layers, param_counts, topo.get_num_pipeline_stages())
         stage_idx = topo.get_pipeline_stage_idx()
         self.layer_offset = cumsum([0] + [len(stage) for stage in stages])[stage_idx]
         stages = [ParallelSequential(*stage) for stage in stages]
