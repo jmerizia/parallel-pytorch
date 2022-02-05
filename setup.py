@@ -4,7 +4,7 @@ setup(
   name = 'parallel-pytorch',
   packages = find_packages(exclude=[]),
   include_package_data = True,
-  version = '0.0.2',
+  version = '0.0.3',
   license='MIT',
   description = 'utilities for working with MPI+PyTorch',
   author = 'Jacob Merizian',
