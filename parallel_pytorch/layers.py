@@ -10,7 +10,7 @@ from parallel_pytorch.ops import AllSumReduce, tensor_merge, tensor_split
 
 class ParallelSequential(nn.Sequential, ParallelModule):
     """
-    A replacement to torch.nn.Sequential when sub-modules will be ParallelModules.
+    A replacement to torch.nn.Sequential that should be used when sub-modules are ParallelModules.
     """
 
     pass

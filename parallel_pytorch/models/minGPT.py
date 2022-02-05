@@ -197,16 +197,16 @@ def make_pipelined_GPT(
     head = nn.Linear(n_embd, vocab_size, bias=False, device=device)
 
     # break model into pipeline stages
-    layers = [
-        emb,
-        drop,
-        *blocks,
-        ln_f,
-        head,
-    ]
-    stages = split_list(layers, topo.get_num_pipeline_stages())
-    stages = [ParallelSequential(*stage) for stage in stages]
-    pipeline = Pipeline(topo=topo, stages=stages)
+    pipeline = Pipeline(
+        topo=topo,
+        layers=[
+            emb,
+            drop,
+            *blocks,
+            ln_f,
+            head,
+        ]
+    )
 
     def _init_weights(module):
         with torch.no_grad():

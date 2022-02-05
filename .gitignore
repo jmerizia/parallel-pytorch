@@ -154,3 +154,6 @@ cython_debug/
 # Vim
 *.swp
 *.swo
+
+# for tests
+test_dir
