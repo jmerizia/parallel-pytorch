@@ -10,6 +10,14 @@ along with some models and helpful utilities.
 It is based around the [DistDL](https://github.com/distdl/distdl) programming model,
 but aims to be feature complete for transformers.
 
+## Assumptions
+
+There are few assumptions that this library makes in order to simplify the code.
+
+1. Checkpoints are saved to / loaded from a shared filesystem.
+2. All parameters must exist on all ranks. If you need a parameter on only one worker, create it on all workers
+   and only use it on the one worker.
+
 ## Todo
 
 core

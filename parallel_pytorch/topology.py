@@ -54,6 +54,9 @@ class Topology(object):
         self.model_comm = self.pipeline_comm.Split(color=pipeline_rank // self.mp, key=pipeline_rank)
         self.per_stage_dp_comm = self.data_comm.Split(color=data_rank % (self.pp * self.mp), key=data_rank)
 
+    def is_root(self):
+        return self.data_comm.Get_rank() == 0
+
     ################
     #     MODEL    #
     ################

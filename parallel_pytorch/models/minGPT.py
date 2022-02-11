@@ -24,7 +24,7 @@ from parallel_pytorch.topology import Topology
 logger = logging.getLogger(__name__)
 
 
-class MLP(ParallelModule):
+class MLP(nn.Module):
     def __init__(
         self,
         *,
@@ -34,15 +34,26 @@ class MLP(ParallelModule):
     ):
         super().__init__()
         self.topo = topo
-        self.mlp = ParallelSequential(
+        size = topo.model_comm.Get_size()
+        assert (4 * n_embd) % size == 0, \
+            "Expected 4 * n_embd to be divisible by the number of model parallel workers."
+        self.mlp = nn.Sequential(
             Broadcast(topo.model_comm),
-            LinearDistributedOutput(topo, n_embd, 4 * n_embd, device=device),
+            nn.Linear(n_embd, 4 * n_embd // size, device=device),
             nn.ReLU(),
-            LinearDistributedInput(topo, 4 * n_embd, n_embd, device=device, bias=False),
+            nn.Linear(4 * n_embd // size, n_embd, device=device, bias=False),
             AllSumReduce(topo.model_comm),
         )
         # This must be done _after_ the reduce, otherwise it will be redundantly added for each MP worker.
         self.bias = nn.Parameter(torch.zeros((1, n_embd), device=device))
+        # Since the module's parameters are sharded, we need to describe the "shape of the workers" which can tell
+        # us how to unshard the parameters.
+        self.param_worker_shapes = {
+            'mlp.1.weight': [1, size],
+            'mlp.1.bias': [size],
+            'mlp.3.weight': [size, 1],
+            'bias': None,
+        }
 
     def forward(self, x):
         return self.mlp(x) + self.bias
@@ -73,19 +84,30 @@ class CausalSelfAttention(ParallelModule):
         assert (n_embd // size) % (n_head // size) == 0
         # key, query, value projections for all heads
         self.bc = Broadcast(topo.model_comm)
-        self.key = LinearDistributedOutput(topo, n_embd, n_embd, device=device)
-        self.query = LinearDistributedOutput(topo, n_embd, n_embd, device=device)
-        self.value = LinearDistributedOutput(topo, n_embd, n_embd, device=device)
+        self.key = nn.Linear(n_embd, n_embd // size, device=device)
+        self.query = nn.Linear(n_embd, n_embd // size, device=device)
+        self.value = nn.Linear(n_embd, n_embd // size, device=device)
         # regularization
         self.attn_drop = nn.Dropout(attn_pdrop)
         self.resid_drop = nn.Dropout(resid_pdrop)
         # output projection
-        self.proj = LinearDistributedInput(topo, n_embd, n_embd, device=device)
+        self.proj = nn.Linear(n_embd // size, n_embd, bias=False, device=device)
         self.sr = AllSumReduce(topo.model_comm)
+        self.proj_bias = nn.Parameter(torch.zeros(n_embd, device=device))
         # causal mask to ensure that attention is only applied to the left in the input sequence
         self.register_buffer("mask", torch.tril(torch.ones(block_size, block_size, device=device))
                                      .view(1, 1, block_size, block_size))
         self.local_n_head = n_head // size
+        self.param_worker_shapes = {
+            'key.weight': [1, size],
+            'key.bias': [size],
+            'query.weight': [1, size],
+            'query.bias': [size],
+            'value.weight': [1, size],
+            'value.bias': [size],
+            'proj.weight': [size, 1],
+            'proj_bias': [size],
+        }
 
     def forward(self, x, layer_past=None):
 
