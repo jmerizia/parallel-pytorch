@@ -4,10 +4,10 @@ A simple pipeline scheduler that plays nicely with PyTorch.
 
 from collections import OrderedDict
 from pathlib import Path
-from typing import List
+from typing import Dict, List, OrderedDict as OrderedDictType
 import torch
-from parallel_pytorch.layers import ParallelSequential
-from parallel_pytorch.module import ParallelModule
+from torch.nn import Module, Sequential
+from torch import Tensor
 import os
 
 from parallel_pytorch.topology import Topology
@@ -23,7 +23,8 @@ class Pipeline(object):
         self,
         *,
         topo: Topology,
-        layers: List[ParallelModule],
+        layers: List[Module],
+        param_worker_shapes: Dict[str, List[int]],
     ):
         super().__init__()
         self.topo = topo
@@ -31,57 +32,31 @@ class Pipeline(object):
         stages = split_list_weighted(layers, param_counts, topo.get_num_pipeline_stages())
         stage_idx = topo.get_pipeline_stage_idx()
         self.layer_offset = cumsum([0] + [len(stage) for stage in stages])[stage_idx]
-        stages = [ParallelSequential(*stage) for stage in stages]
+        stages = [Sequential(*stage) for stage in stages]
         assert len(stages) == topo.get_num_pipeline_stages()
         self.stage = stages[topo.get_pipeline_stage_idx()]
         for idx, stage in enumerate(stages):
             if idx != topo.get_pipeline_stage_idx():
                 del stage
+        self.param_worker_shapes = param_worker_shapes
+        self.__call__ = self.forward
+        self.apply = self.stage.apply
+        self.named_parameters = self.stage.named_parameters
+        self.named_children = self.stage.named_children
 
-    def __call__(self, batches: torch.Tensor):
-        return self.forward(batches)
-
-    def save_checkpoint(self, checkpoint_directory: str):
+    def state_dict(self, prefix='') -> OrderedDictType[str, Tensor]:
         """
-        Saves a checkpoint of this pipeline as a sequence of files, one per layer in the pipeline.
-        The given directory will be filled with the individual checkpoint files.
-        """
-
-        if self.topo.data_comm.Get_rank() == 0:
-            Path(checkpoint_directory).mkdir(exist_ok=True)
-
-        if self.topo.get_data_parallel_idx() == 0:
-            state_dict = self.stage.parallel_state_dict()
-            # split the state dict into per-layer state dicts
-            buckets = [OrderedDict()] * len(list(self.stage.children()))
-            for name, param in state_dict.items():
-                idx = int(name.split('.')[0])
-                new_name = '.'.join(name.split('.')[1:])
-                buckets[idx][new_name] = param
-            for idx, bucket in enumerate(buckets):
-                fn = os.path.join(checkpoint_directory, f'layer_{self.layer_offset + idx}.pt')
-                torch.save(bucket, fn)
-        self.topo.data_comm.Barrier()
-
-    def load_checkpoint(self, checkpoint_directory: str):
-        """
-        Loads a checkpoint from a sequence of files, one per layer in the pipeline.
-        The given directory should point at the directory containing the per-layer files.
+        Retrieves the state dict for this worker's stage of the pipeline.
         """
 
-        # all dp copies should load the file
         state_dict = OrderedDict()
-        for idx in range(len(list(self.stage.children()))):
-            fn = os.path.join(checkpoint_directory, f'layer_{self.layer_offset + idx}.pt')
-            bucket = torch.load(fn)
-            for name, param in bucket.items():
-                new_name = str(idx) + '.' + name
-                state_dict[new_name] = param
-            state_dict.update(bucket)
-        self.stage.parallel_load_state_dict(state_dict)
-        self.topo.data_comm.Barrier()
+        for name, param in self.stage.state_dict().items():
+            idx = int(name.split('.')[0])
+            new_name = str(self.layer_offset + idx) + '.' + '.'.join(name.split('.')[1:])
+            state_dict[new_name] = param
+        return state_dict
 
-    def forward(self, batches: torch.Tensor):
+    def forward(self, batches: Tensor):
         self.inputs = []
         self.outputs = []
         recv_buffer = None

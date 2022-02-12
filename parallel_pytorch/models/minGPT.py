@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from parallel_pytorch.layers import DistributedEmbedding, LinearDistributedInput, LinearDistributedOutput, ParallelSequential
+from parallel_pytorch.layers import DistributedEmbedding
 from parallel_pytorch.module import ParallelModule
 from parallel_pytorch.ops import AllSumReduceFunc, Broadcast, AllSumReduce
 from parallel_pytorch.pipeline import Pipeline

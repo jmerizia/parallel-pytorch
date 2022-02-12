@@ -43,8 +43,8 @@ Some notes:
   is to allow for loading with less CPU memory (which may be important for certain large models).
 """
 
-from ctypes import Union
-from typing import Dict, List, Optional, OrderedDict as OrderedDictType
+from pathlib import Path
+from typing import Dict, List, Optional, Union, OrderedDict as OrderedDictType
 from collections import OrderedDict
 import torch
 from torch import Tensor
@@ -68,33 +68,38 @@ def _get_topology_fn(directory: str):
     return fn
 
 
-def _aggregate_param_worker_shapes(module: Union[Module, Pipeline], prefix='') -> Dict[str, List[int]]:
-    shapes = {}
-    if hasattr(module, 'param_worker_shapes'):
-        for param_name, shape in module.param_worker_shapes.items():
-            n = prefix + param_name
-            assert n not in shapes
-            shapes[n] = shape
-    for name, child in module.named_children():
-        child_shapes = _aggregate_param_worker_shapes(child, prefix=prefix + name + '.')
-        assert len(set(child_shapes.keys()) & set(shapes)) == 0
-        shapes.update(child_shapes)
+def _aggregate_param_worker_shapes(module: Union[Module, Pipeline]) -> Dict[str, List[int]]:
+    def _collect_recursive(mod, prefix=''):
+        shapes = {}
+        if hasattr(mod, 'param_worker_shapes'):
+            for param_name, shape in mod.param_worker_shapes.items():
+                n = prefix + param_name
+                assert n not in shapes
+                shapes[n] = shape
+        for name, child in mod.named_children():
+            child_shapes = _collect_recursive(child, prefix=prefix + name + '.')
+            assert len(set(child_shapes.keys()) & set(shapes)) == 0
+            shapes.update(child_shapes)
+        return shapes
+    shapes = _collect_recursive(module)
     # iterate over all parameters, and ensure we have a worker shape for them.
     for name, p in module.named_parameters():
         assert name in shapes, \
-            f'Failed to find worker shape for module {name}. ' + \
+            f'Failed to find worker shape for parameter "{name}". ' + \
             f'It should be specified in `param_worker_shapes` in the respective module. ' + \
             f'If this parameter does not have a shape (i.e., it need not by merged), you must denote its shape as "None".'
     return shapes
 
 
 def save_checkpoint(topo: Topology, module: Union[Module, Pipeline], directory: str):
+    assert not os.path.exists(directory), \
+        f'Checkpoint directory {directory} already exists.'
     if topo.get_data_parallel_idx() == 0:
-        stage_idx = topo.get_pipeline_stage_idx()
         shard_idx = topo.model_comm.Get_rank()
         d = module.state_dict()
         for param_name, tensor in d.items():
-            checkpoint_fn = _get_checkpoint_file_fn(directory, stage_idx, shard_idx, param_name)
+            checkpoint_fn = _get_checkpoint_file_fn(directory, shard_idx, param_name)
+            Path(os.path.dirname(checkpoint_fn)).mkdir(exist_ok=True, parents=True)
             torch.save(tensor, checkpoint_fn)
     if topo.is_root():
         # create the topology file
@@ -106,7 +111,6 @@ def save_checkpoint(topo: Topology, module: Union[Module, Pipeline], directory: 
                 'mp': topo.mp,
                 'param_worker_shapes': _aggregate_param_worker_shapes(module),
             }, f)
-
     topo.data_comm.Barrier()
 
 
@@ -126,7 +130,7 @@ def _load_parameter(directory: str, mp: int, param_name: str, shape: Optional[Li
 
 
 def load_checkpoint(topo: Topology, module: Union[Module, Pipeline], directory: str):
-    with open(_get_topology_fn(), 'r') as f:
+    with open(_get_topology_fn(directory), 'r') as f:
         old_topology = json.load(f)
     # load this module's parameters
     for name, p in module.named_parameters():
