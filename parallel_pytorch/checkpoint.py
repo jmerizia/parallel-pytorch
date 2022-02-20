@@ -9,9 +9,11 @@ from torch import Tensor
 from torch.nn import Module
 import os
 import json
+import numpy as np
 
 from parallel_pytorch.pipeline import Pipeline
 from parallel_pytorch.topology import Topology
+from parallel_pytorch.utils import tensor_merge, tensor_split
 
 
 def _get_checkpoint_file_fn(directory: str, shard_idx: int, param_name: str):
@@ -25,11 +27,15 @@ def _get_topology_fn(directory: str):
     return fn
 
 
-def _aggregate_param_worker_shapes(module: Union[Module, Pipeline]) -> Dict[str, List[int]]:
+def _aggregate_param_worker_shapes(module: Union[Module, Pipeline]) -> Dict[str, Optional[List[int]]]:
     def _collect_recursive(mod, prefix=''):
         shapes = {}
         if hasattr(mod, 'param_worker_shapes'):
+            assert type(mod.param_worker_shapes) == dict, \
+                f"param_worker_shapes must be a dict of List[int] or None. Found type {type(mod.param_worker_shapes)}"
             for param_name, shape in mod.param_worker_shapes.items():
+                assert shape is None or type(shape) == list, \
+                    f"param_worker_shapes must be a dict of List[int] or None. Found element type {type(shape)}"
                 n = prefix + param_name
                 assert n not in shapes
                 shapes[n] = shape
@@ -44,7 +50,12 @@ def _aggregate_param_worker_shapes(module: Union[Module, Pipeline]) -> Dict[str,
         assert name in shapes, \
             f'Failed to find worker shape for parameter "{name}". ' + \
             f'It should be specified in `param_worker_shapes` in the respective module. ' + \
-            f'If this parameter does not have a shape (i.e., it need not by merged), you must denote its shape as "None".'
+            f'If this parameter does not have a shape (i.e., it need not be merged), you must denote its shape as "None".'
+    # # iterate over all names, and ensure we have no extras
+    # uniq = set(name for name, p in module.named_parameters())
+    # for k, v in shapes.items():
+    #     assert k in uniq, \
+    #         f"Found an extra param_worker_shape with with full name {k} and shape {v}"
     return shapes
 
 
@@ -94,8 +105,10 @@ def save_checkpoint(topo: Topology, module: Union[Module, Pipeline], directory: 
     is to allow for loading with less CPU memory (which may be important for certain large models).
     """
 
-    assert not os.path.exists(directory), \
-        f'Checkpoint directory {directory} already exists.'
+    if topo.data_comm.Get_rank() == 0:
+        assert not os.path.exists(directory), \
+            f'Checkpoint directory {directory} already exists.'
+    topo.data_comm.Barrier()
     if topo.get_data_parallel_idx() == 0:
         shard_idx = topo.model_comm.Get_rank()
         d = module.state_dict()
@@ -116,16 +129,17 @@ def save_checkpoint(topo: Topology, module: Union[Module, Pipeline], directory: 
     topo.data_comm.Barrier()
 
 
-def _load_parameter(directory: str, mp: int, param_name: str, shape: List[int]) -> Tensor:
+def _load_parameter(directory: str, mp: int, param_name: str, shape: Optional[List[int]]) -> Tensor:
     tensors = []
     for shard_idx in range(mp):
         fn = _get_checkpoint_file_fn(directory, shard_idx, param_name)
         tensor = torch.load(fn)
         assert isinstance(tensor, Tensor)
-        tensors.append(tensors)
-    # merge the tensors
-
-    return tensors
+        tensors.append(tensor)
+    # merge the tensors into the whole parameter
+    # TODO: use an allocator to reduce memory overhead here
+    tensor = tensor_merge(tensors=tensors, shape=shape)
+    return tensor
 
 
 def load_checkpoint(topo: Topology, module: Union[Module, Pipeline], directory: str):
@@ -137,13 +151,19 @@ def load_checkpoint(topo: Topology, module: Union[Module, Pipeline], directory: 
 
     with open(_get_topology_fn(directory), 'r') as f:
         old_topology = json.load(f)
+    new_shapes = _aggregate_param_worker_shapes(module)
     # load this module's parameters
     for name, p in module.named_parameters():
+        # read from disk using the original shape
         old_mp = old_topology['mp']
         old_shape = old_topology['param_worker_shapes'][name]
+        new_shape = new_shapes[name]
+        if new_shape is not None:
+            assert np.prod(new_shape) == topo.model_comm.Get_size(), \
+                f"We assume that worker shapes have volume equal to the model dimension. volume({new_shape}) != {topo.model_comm.Get_size()}"
         tensor = _load_parameter(directory, mp=old_mp, param_name=name, shape=old_shape)
-        # TODO: split the tensor to what is needed in the current topology
-        p.data = tensor
+        # split off the local shard based on the new shape
+        tensors = tensor_split(tensor=tensor, shape=new_shape)
+        p.data = tensors[topo.model_comm.Get_rank()]
     # TODO: catch unused params
-
     topo.data_comm.Barrier()

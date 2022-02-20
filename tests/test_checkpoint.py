@@ -33,10 +33,9 @@ def build_model(
         for _ in range(n_blocks)
     ]
     param_worker_shapes = {
-        **{f'{i}.1.weight' : i for i in range(n_blocks)},
-        **{f'{i}.1.bias'   : i for i in range(n_blocks)},
-        **{f'{i}.3.weight' : i for i in range(n_blocks)},
-        **{f'{i}.3.bias'   : i for i in range(n_blocks)},
+        **{f'{i}.1.weight' : [size, 1] for i in range(n_blocks)},
+        **{f'{i}.1.bias'   : [size]    for i in range(n_blocks)},
+        **{f'{i}.3.weight' : [1, size] for i in range(n_blocks)},
     }
     pipeline = Pipeline(topo=topo, layers=blocks, param_worker_shapes=param_worker_shapes)
     def _init_weights(module):
@@ -82,6 +81,7 @@ def test_1():
         [(1, 8, 1), (4, 1, 2)],
         [(1, 1, 1), (8, 1, 1)],
     ]
+    batch_size = 8
     n_input = 16
     n_hidden = 16
     n_blocks = 10
@@ -132,7 +132,7 @@ def test_1():
             MPI.COMM_WORLD.Barrier()
 
             # try passing the same data into each pipeline. The outputs should be equivalent
-            x = torch.ones([1, n_input])
+            x = torch.ones([batch_size, n_input])
             if topo_A.active:
                 out_A = pipeline_A(x)
                 # broadcast, so that we have it on global rank 0

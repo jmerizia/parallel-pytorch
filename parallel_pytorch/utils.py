@@ -145,7 +145,8 @@ def tensor_merge(tensors: List[Tensor], shape, buf=None) -> Tensor:
     """
 
     assert len(tensors) > 0
-    assert len(tensors[0].shape) == len(shape)
+    assert len(tensors[0].shape) == len(shape), \
+        f"Dimensionality of tensor ({len(tensors[0].shape)}) differs from dimensionality of shape ({len(shape)})"
     first_shape = tensors[0].shape
     first_device = tensors[0].device
     first_dtype = tensors[0].dtype

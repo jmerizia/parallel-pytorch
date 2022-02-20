@@ -34,6 +34,7 @@ core
 - [ ] Dockerfile
 - [ ] ability to run larger models on less GPU space with pipeline+offload
 - [ ] benchmarking/flame-graph
+- [ ] stricter Mypy typing
 
 models
 - [X] minGPT

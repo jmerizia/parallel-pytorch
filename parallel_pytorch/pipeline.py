@@ -39,10 +39,12 @@ class Pipeline(object):
             if idx != topo.get_pipeline_stage_idx():
                 del stage
         self.param_worker_shapes = param_worker_shapes
-        self.__call__ = self.forward
         self.apply = self.stage.apply
         self.named_parameters = self.stage.named_parameters
         self.named_children = self.stage.named_children
+
+    def __call__(self, batches: Tensor):
+        return self.forward(batches)
 
     def state_dict(self, prefix='') -> OrderedDictType[str, Tensor]:
         """
