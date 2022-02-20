@@ -1,14 +1,13 @@
 from collections import OrderedDict
 import torch
 import torch.nn as nn
-from parallel_pytorch.module import ParallelModule
 from parallel_pytorch.topology import Topology
 
 from parallel_pytorch.utils import cumsum, split_number
-from parallel_pytorch.ops import AllSumReduce, tensor_merge, tensor_split
+from parallel_pytorch.ops import AllSumReduce
 
 
-class DistributedEmbedding(ParallelModule):
+class DistributedEmbedding(nn.Module):
     """
     PyTorch's Embedding layer is a bit tricky to parallelize, so this does that.
     It uses the Megatron-LM style parallelization method by dividing over vocab space.
@@ -35,6 +34,10 @@ class DistributedEmbedding(ParallelModule):
         self.tok_emb = nn.Embedding(self.local_vocab_size + 1, n_embd, 0, device=device)
         self.sr = AllSumReduce(topo.model_comm)
         self.pos_emb = nn.Parameter(torch.zeros(1, block_size, n_embd, device=device))
+        self.param_worker_shapes = {
+            'tok_emb.weight': [1, size],
+            'pos_emb': None,
+        }
 
     def forward(self, idx):
         b, t = idx.size()
@@ -51,17 +54,3 @@ class DistributedEmbedding(ParallelModule):
         x += self.pos_emb[:, :t, :]
         self.state_dict()
         return x
-
-    def parallel_state_dict(self, prefix=''):
-        d = OrderedDict()
-        comm = self.topo.model_comm
-        size = comm.Get_size()
-        d[prefix + 'tok_emb.weight'] = tensor_merge(x=self.tok_emb.weight.data, comm=comm, worker_shape=[1, size])
-        d[prefix + 'pos_emb'] = self.pos_emb.data
-        return d
-
-    def parallel_load_state_dict(self, state_dict, prefix=''):
-        comm = self.topo.model_comm
-        size = comm.Get_size()
-        self.tok_emb.weight.data = tensor_split(x=state_dict[prefix + 'tok_emb.weight'], comm=comm, worker_shape=[1, size])
-        self.pos_emb.data = state_dict[prefix + 'pos_emb']

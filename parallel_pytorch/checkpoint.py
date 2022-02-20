@@ -1,46 +1,4 @@
 """
-This file exposes functions `save_checkpoint` and `load_checkpoint` which works with any Module or Pipeline,
-and is invariant to network topology.
-It assumes that the filesystem is shared among all workers.
-Only the root data parallel replica will participate in saving checkpoints.
-
-The file format on disk of a checkpoint is a directory of files, where each file corresponds to a single parameter
-in the network and 
-There is also a "topology.json" file which describes the topology that was used when a checkpoint was created.
-
-For example, a parallel MLP with pp = 2 and mp = 2 will produce the following checkpoint directory:
-
-<checkpoint name>/
-    shard_0/
-        ff1_weight.pt
-        ff1_bias.pt
-        ff2_weight.pt
-        ff2_bias.pt
-    shard_1/
-        ff1_weight.pt
-        ff1_bias.pt
-        ff2_weight.pt
-        ff2_bias.pt
-    topology.json
-
-Each ".pt" file contains a serialized Tensor (as opposed to the typical serialized OrderedDict).
-The "topology.json" file would contain the following JSON structure (for the above example):
-
-{
-    'dp': <num replicas>,
-    'pp': 2,
-    'mp': 2,
-    'param_worker_shapes': {
-        'ff1_weight': [1, 2],
-        'ff1_bias': [2],
-        'ff2_weight': [2, 1],
-        'ff2_bias': None,
-    }
-}
-
-Some notes:
-- The reason we use many small files as opposed to a large file with a serialized DefaultDict (as torch normally does)
-  is to allow for loading with less CPU memory (which may be important for certain large models).
 """
 
 from pathlib import Path
@@ -50,10 +8,9 @@ import torch
 from torch import Tensor
 from torch.nn import Module
 import os
-from parallel_pytorch.ops import tensor_merge
 import json
-from parallel_pytorch.pipeline import Pipeline
 
+from parallel_pytorch.pipeline import Pipeline
 from parallel_pytorch.topology import Topology
 
 
@@ -92,6 +49,51 @@ def _aggregate_param_worker_shapes(module: Union[Module, Pipeline]) -> Dict[str,
 
 
 def save_checkpoint(topo: Topology, module: Union[Module, Pipeline], directory: str):
+    """
+    Checkpoint any torch.nn.Module or Pipeline, invariant to network topology.
+
+    This assumes that the filesystem is shared among all workers.
+    Only the root data parallel replica will participate in saving checkpoints.
+
+    The file format on disk of a checkpoint is a directory of files,
+    where each file corresponds to a single parameter in the network.
+    There is also a "topology.json" file which describes the topology that was used when a checkpoint was created.
+
+    For example, a parallel MLP with pp = 2 and mp = 2 will produce the following checkpoint directory:
+
+    <checkpoint name>/
+        shard_0/
+            ff1_weight.pt
+            ff1_bias.pt
+            ff2_weight.pt
+            ff2_bias.pt
+        shard_1/
+            ff1_weight.pt
+            ff1_bias.pt
+            ff2_weight.pt
+            ff2_bias.pt
+        topology.json
+
+    Each ".pt" file contains a serialized Tensor (as opposed to the typical serialized OrderedDict).
+    The "topology.json" file would contain the following JSON structure (for the above example):
+
+    {
+        'dp': <num replicas>,
+        'pp': 2,
+        'mp': 2,
+        'param_worker_shapes': {
+            'ff1_weight': [1, 2],
+            'ff1_bias': [2],
+            'ff2_weight': [2, 1],
+            'ff2_bias': None,
+        }
+    }
+
+    Some notes:
+    - The reason this uses many small files as opposed to a large file with a serialized DefaultDict (as torch normally does)
+    is to allow for loading with less CPU memory (which may be important for certain large models).
+    """
+
     assert not os.path.exists(directory), \
         f'Checkpoint directory {directory} already exists.'
     if topo.get_data_parallel_idx() == 0:
@@ -114,22 +116,25 @@ def save_checkpoint(topo: Topology, module: Union[Module, Pipeline], directory: 
     topo.data_comm.Barrier()
 
 
-def _load_parameter(directory: str, mp: int, param_name: str, shape: Optional[List[int]]) -> Tensor:
+def _load_parameter(directory: str, mp: int, param_name: str, shape: List[int]) -> Tensor:
     tensors = []
     for shard_idx in range(mp):
         fn = _get_checkpoint_file_fn(directory, shard_idx, param_name)
         tensor = torch.load(fn)
         assert isinstance(tensor, Tensor)
         tensors.append(tensors)
-    if shape is not None:
-        # TODO: merge the tensors based on shape
-        pass
-    else:
-        # shape is None, so we just return the first tensor
-        return tensors[0]
+    # merge the tensors
+
+    return tensors
 
 
 def load_checkpoint(topo: Topology, module: Union[Module, Pipeline], directory: str):
+    """
+    Load a checkpoint that has been saved with `save_checkpoint`, invariant of topology.
+
+    Note: This may need to split/merge the tensor
+    """
+
     with open(_get_topology_fn(directory), 'r') as f:
         old_topology = json.load(f)
     # load this module's parameters

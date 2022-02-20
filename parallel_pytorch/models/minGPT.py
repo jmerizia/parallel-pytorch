@@ -16,7 +16,6 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 from parallel_pytorch.layers import DistributedEmbedding
-from parallel_pytorch.module import ParallelModule
 from parallel_pytorch.ops import AllSumReduceFunc, Broadcast, AllSumReduce
 from parallel_pytorch.pipeline import Pipeline
 from parallel_pytorch.topology import Topology
@@ -59,7 +58,7 @@ class MLP(nn.Module):
         return self.mlp(x) + self.bias
 
 
-class CausalSelfAttention(ParallelModule):
+class CausalSelfAttention(nn.Module):
     """
     A vanilla multi-head masked self-attention layer with a projection at the end.
     It is possible to use torch.nn.MultiheadAttention here but I am including an
@@ -137,7 +136,7 @@ class CausalSelfAttention(ParallelModule):
         return y
 
 
-class Block(ParallelModule):
+class Block(nn.Module):
     """ an unassuming Transformer block """
 
     def __init__(

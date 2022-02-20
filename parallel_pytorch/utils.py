@@ -1,11 +1,14 @@
+"Non-parallel utilities"
+
 from functools import wraps
 import itertools
 import torch
-from typing import Any, List
+from typing import Any, List, Optional
 from mpi4py import MPI
 import random
 import numpy as np
 import traceback
+from torch import Tensor
 
 
 def set_seed(seed):
@@ -133,3 +136,60 @@ def abort_on_exception(f):
             print(traceback.format_exc(), flush=True)
             MPI.COMM_WORLD.Abort(1)
     return wrapper
+
+
+def tensor_merge(tensors: List[Tensor], shape, buf=None) -> Tensor:
+    """
+    Merge the given tensors as defined by shape.
+    The "shape" describes
+    """
+
+    assert len(tensors) > 0
+    assert len(tensors[0].shape) == len(shape)
+    first_shape = tensors[0].shape
+    first_device = tensors[0].device
+    first_dtype = tensors[0].dtype
+    for t in tensors:
+        assert list(first_shape) == list(t.shape), \
+            "Expected shapes of tensors to all be the same."
+        assert first_device == t.device, \
+            "Expected devices of tensors to all be the same."
+        assert first_dtype == t.dtype, \
+            "Expected dtypes of tensors to all be the same."
+    assert np.prod(shape) == len(tensors)
+    in_shape = np.array(tensors[0].shape)
+    out_shape = in_shape * np.array(shape)
+    if buf is None:
+        buf = torch.zeros(tuple(out_shape), device=tensors[0].device, dtype=tensors[0].dtype)
+    else:
+        assert list(buf.shape) == list(out_shape)
+    for idx, coord in enumerate(iter_cart_coords(shape, as_array=True)):
+        a = coord * in_shape
+        b = (coord + 1) * in_shape
+        s = [slice(i, j) for i, j in zip(a, b)]
+        buf[s] = tensors[idx]
+    return buf
+
+
+def tensor_split(tensor: Tensor, shape, bufs: Optional[List[Tensor]] = None) -> List[Tensor]:
+    shape = np.array(shape)
+    assert len(tensor.shape) == len(shape)
+    in_shape = np.array(tensor.shape)
+    out_shape = in_shape // np.array(shape)
+    for a, b in zip(in_shape, shape):
+        assert a % b == 0, \
+            "Tensor must be divisible by worker grid shape in all dimensions."
+    if bufs is None:
+        bufs = [
+            torch.zeros(tuple(out_shape), device=tensor.device, dtype=tensor.dtype)
+            for _ in range(np.prod(shape))
+        ]
+    for buf in bufs:
+        assert list(buf.shape) == list(out_shape), \
+            "Expected buffer shape to be equal to input tensor shape divided by cartesian shape."
+    for idx, coord in enumerate(iter_cart_coords(shape, as_array=True)):
+        a = coord * in_shape // shape
+        b = (coord + 1) * out_shape
+        s = [slice(i, j) for i, j in zip(a, b)]
+        bufs[idx].copy_(tensor[s])
+    return bufs
